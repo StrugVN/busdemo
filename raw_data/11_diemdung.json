@@ -1,0 +1,39 @@
+{
+  "displayFieldName": "TenDiemDung",
+  "fieldAliases": {
+    "TenDiemDung": "TenTram"
+  },
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 102100,
+    "latestWkid": 3857
+  },
+  "fields": [
+    {
+      "name": "TenDiemDung",
+      "type": "esriFieldTypeString",
+      "alias": "TenTram",
+      "length": 150
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "TenDiemDung": "Bến xe khách 36 Nguyễn Văn Linh"
+      },
+      "geometry": {
+        "x": 11773387.395678392,
+        "y": 1121571.0812477295
+      }
+    },
+    {
+      "attributes": {
+        "TenDiemDung": "Bến xe khách Đại Ngãi"
+      },
+      "geometry": {
+        "x": 11806492.739028186,
+        "y": 1088695.5362136404
+      }
+    }
+  ]
+}
