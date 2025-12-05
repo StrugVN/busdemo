@@ -65,21 +65,23 @@ def map_view(request):
 
 def route_path_view(request):
     ma_tuyen = request.GET.get("MaTuyen")
+    chieu = request.GET.get("Chieu", "0")  # default 0 = chiều đi
+
     if not ma_tuyen:
         return JsonResponse({"error": "MaTuyen is required"}, status=400)
 
+    field = "Path" if chieu == "0" else "Path_Nguoc"
+
     with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT AsText(Path) FROM tuyen_bus WHERE MaTuyen = %s",
-            [ma_tuyen],
-        )
+        cursor.execute(f"SELECT AsText({field}) FROM tuyen_bus WHERE MaTuyen = %s", [ma_tuyen])
         row = cursor.fetchone()
 
     if not row or row[0] is None:
-        return JsonResponse({"error": "Route not found"}, status=404)
+        return JsonResponse({"error": "Route/geometry not found"}, status=404)
 
     wkt = row[0]
     path = wkt_to_latlng_list(wkt)
+
     return JsonResponse({"path": path})
 
 @csrf_exempt

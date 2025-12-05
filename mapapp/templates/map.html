@@ -57,7 +57,14 @@
       </option>
       {% endfor %}
     </select>
+
+    <label for="directionSelect" style="margin-left: 12px;">Direction:</label>
+    <select id="directionSelect">
+      <option value="0">Chiều đi</option>
+      <option value="1">Chiều về</option>
+    </select>
   </div>
+
 
   <div id="map"></div>
   <div id="messageBox"></div>
@@ -185,8 +192,10 @@
       });
     }
 
+    async function loadAndDrawRoute() {
+      const maTuyen = document.getElementById("routeSelect").value;
+      const chieu = document.getElementById("directionSelect").value;
 
-    async function loadAndDrawRoute(maTuyen) {
       if (!maTuyen) {
         if (currentPolyline) {
           currentPolyline.setMap(null);
@@ -195,17 +204,18 @@
         return;
       }
 
-      const res = await fetch(`/route-path/?MaTuyen=${encodeURIComponent(maTuyen)}`);
+      const res = await fetch(`/route-path/?MaTuyen=${encodeURIComponent(maTuyen)}&Chieu=${encodeURIComponent(chieu)}`);
       if (!res.ok) {
         console.error("Failed to load route", await res.text());
         showMessage("Failed to load route", 4000);
         return;
       }
+
       const data = await res.json();
       const path = data.path || [];
+
       if (!path.length) {
-        console.warn("Route has empty path");
-        showMessage("Route has no path data", 3000);
+        showMessage("Route has no path geometry.", 3000);
         return;
       }
 
@@ -213,10 +223,53 @@
         currentPolyline.setMap(null);
       }
 
+      const start = path[0];
+      const end = path[path.length - 1];
+
       currentPolyline = new google.maps.Polyline({
         path: path,
         map: map,
         strokeWeight: 4,
+        strokeColor: "#0d47a1",
+
+        icons: [
+          // Direction arrows
+          {
+            icon: {
+              path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+              scale: 2.5,
+              strokeOpacity: 0.9
+            },
+            offset: "10%",
+            repeat: "10%"
+          },
+
+          // START POINT — blue dot
+          {
+            icon: {
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 4,
+              fillColor: "#0000ff",
+              fillOpacity: 1,
+              strokeColor: "#0000ff",
+              strokeWeight: 1
+            },
+            offset: "0%"     // very start
+          },
+
+          // END POINT — red dot
+          {
+            icon: {
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 4,
+              fillColor: "#ff0000",
+              fillOpacity: 1,
+              strokeColor: "#ff0000",
+              strokeWeight: 1
+            },
+            offset: "100%"   // end of the line
+          }
+        ]
       });
 
       const bounds = new google.maps.LatLngBounds();
@@ -224,13 +277,14 @@
       map.fitBounds(bounds);
     }
 
+
     window.onload = function () {
       initMap();
-      const select = document.getElementById("routeSelect");
-      select.addEventListener("change", function () {
-        loadAndDrawRoute(this.value);
-      });
+
+      document.getElementById("routeSelect").addEventListener("change", loadAndDrawRoute);
+      document.getElementById("directionSelect").addEventListener("change", loadAndDrawRoute);
     };
+
   </script>
 </body>
 
