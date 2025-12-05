@@ -1,27 +1,47 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="utf-8" />
   <title>Bus Routes Demo</title>
   <style>
-    html, body {
+    html,
+    body {
       margin: 0;
       padding: 0;
       height: 100%;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
+
     #topbar {
       padding: 8px 12px;
       background: #f5f5f5;
       border-bottom: 1px solid #ddd;
     }
+
     #map {
       width: 100%;
       height: calc(100% - 46px);
     }
+
     select {
       padding: 4px 8px;
       min-width: 220px;
+    }
+
+    /* Simple toast-like message box */
+    #messageBox {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 14px;
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      border-radius: 4px;
+      font-size: 13px;
+      display: none;
+      z-index: 999;
     }
   </style>
 </head>
@@ -32,29 +52,139 @@
     <select id="routeSelect">
       <option value="">-- Select a route --</option>
       {% for r in routes %}
-        <option value="{{ r.MaTuyen }}">
-          {{ r.MaTuyen }} - {{ r.TenTuyen }}
-        </option>
+      <option value="{{ r.MaTuyen }}">
+        {{ r.MaTuyen }} - {{ r.TenTuyen }}
+      </option>
       {% endfor %}
     </select>
   </div>
 
   <div id="map"></div>
+  <div id="messageBox"></div>
 
   <!-- Google Maps JS with key from .env -->
   <script src="https://maps.googleapis.com/maps/api/js?key={{ GG_API_KEY }}"></script>
 
   <script>
+    const STOPS = JSON.parse('{{ stops_json|escapejs }}');
+
     let map;
     let currentPolyline = null;
+    let stopMarkers = [];
+
+    let selectedStop = null;
+    let isChangingLocation = false;
+    let messageTimeoutId = null;
+
+    function showMessage(text, timeout = 3000) {
+      const box = document.getElementById("messageBox");
+      box.textContent = text;
+      box.style.display = "block";
+
+      if (messageTimeoutId) {
+        clearTimeout(messageTimeoutId);
+      }
+      messageTimeoutId = setTimeout(() => {
+        box.style.display = "none";
+      }, timeout);
+    }
 
     function initMap() {
-      const center = { lat: 10.776, lng: 106.700 }; // adjust default
+      const center = { lat: 10.776, lng: 106.700 }; // adjust default if needed
       map = new google.maps.Map(document.getElementById("map"), {
         zoom: 12,
         center: center,
       });
+
+      // Add markers for all stops (independent from routes)
+      STOPS.forEach(stop => {
+        const marker = new google.maps.Marker({
+          position: { lat: stop.lat, lng: stop.lng },
+          map: map,
+          title: stop.TenTram || stop.MaTram,
+        });
+
+        // Save stop data on the marker
+        marker.stopData = stop;
+
+        // Unique button id for this stop
+        const btnId = `change-location-${stop.MaTram}`;
+
+        const info = new google.maps.InfoWindow({
+          content: `
+            <div>
+              <b>${stop.TenTram || stop.MaTram}</b><br/>
+              Mã trạm: ${stop.MaTram}<br/>
+              <button id="${btnId}" type="button">Change location</button>
+            </div>
+          `,
+        });
+
+        marker.addListener("click", () => {
+          info.open(map, marker);
+
+          // Wait until DOM for InfoWindow is ready, then attach click handler
+          google.maps.event.addListenerOnce(info, "domready", () => {
+            const btn = document.getElementById(btnId);
+            if (!btn) return;
+
+            btn.onclick = () => {
+              selectedStop = marker;
+              isChangingLocation = true;
+              showMessage("Click a new location on the map to move this stop.");
+            };
+          });
+        });
+
+        stopMarkers.push(marker);
+      });
+
+      // Map click: if we're in "change location" mode, move marker and update DB
+      map.addListener("click", (event) => {
+        if (!isChangingLocation || !selectedStop) return;
+
+        const newLatLng = event.latLng;
+
+        // Move marker visually
+        selectedStop.setPosition(newLatLng);
+
+        // Update the internal stop data too
+        selectedStop.stopData.lat = newLatLng.lat();
+        selectedStop.stopData.lng = newLatLng.lng();
+
+        isChangingLocation = false;
+
+        showMessage("Saving new location...");
+
+        // Send AJAX to backend to persist change
+        fetch("/update-stop-location/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            MaTram: selectedStop.stopData.MaTram,
+            lat: newLatLng.lat(),
+            lng: newLatLng.lng(),
+          }),
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            if (!data.success) {
+              console.error("DB update failed:", data.error);
+              showMessage("Marker moved, but DB update failed: " + data.error, 5000);
+            } else {
+              console.log("DB updated successfully");
+              showMessage("Stop location updated.", 2500);
+            }
+          })
+          .catch((err) => {
+            console.error("Request error:", err);
+            showMessage("Marker moved, but error updating DB.", 5000);
+          });
+      });
     }
+
 
     async function loadAndDrawRoute(maTuyen) {
       if (!maTuyen) {
@@ -68,27 +198,27 @@
       const res = await fetch(`/route-path/?MaTuyen=${encodeURIComponent(maTuyen)}`);
       if (!res.ok) {
         console.error("Failed to load route", await res.text());
+        showMessage("Failed to load route", 4000);
         return;
       }
       const data = await res.json();
       const path = data.path || [];
       if (!path.length) {
         console.warn("Route has empty path");
+        showMessage("Route has no path data", 3000);
         return;
       }
 
-      // Remove previous line
       if (currentPolyline) {
         currentPolyline.setMap(null);
       }
 
       currentPolyline = new google.maps.Polyline({
-        path: path, // [{lat, lng}, ...]
+        path: path,
         map: map,
         strokeWeight: 4,
       });
 
-      // Fit map to route
       const bounds = new google.maps.LatLngBounds();
       path.forEach(pt => bounds.extend(pt));
       map.fitBounds(bounds);
@@ -96,7 +226,6 @@
 
     window.onload = function () {
       initMap();
-
       const select = document.getElementById("routeSelect");
       select.addEventListener("change", function () {
         loadAndDrawRoute(this.value);
@@ -104,4 +233,5 @@
     };
   </script>
 </body>
+
 </html>

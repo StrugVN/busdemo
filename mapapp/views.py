@@ -2,8 +2,11 @@ from django.shortcuts import render
 from django.conf import settings
 from django.http import JsonResponse
 from django.db import connection
+import json
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 
-from .models import TuyenBus
+from .models import TuyenBus, TramDung
 
 
 def wkt_to_latlng_list(wkt: str):
@@ -31,8 +34,22 @@ def wkt_to_latlng_list(wkt: str):
 
 
 def map_view(request):
-    # Load all routes for dropdown
+    # Routes for dropdown
     routes = list(TuyenBus.objects.values("MaTuyen", "TenTuyen"))
+
+    # All stops
+    stops_qs = TramDung.objects.values("MaTram", "TenTram", "KinhDo", "ViDo")
+    # Filter out rows without coords, just in case
+    stops = [
+        {
+            "MaTram": s["MaTram"],
+            "TenTram": s["TenTram"],
+            "lat": s["ViDo"],
+            "lng": s["KinhDo"],
+        }
+        for s in stops_qs
+        if s["KinhDo"] is not None and s["ViDo"] is not None
+    ]
 
     return render(
         request,
@@ -40,8 +57,10 @@ def map_view(request):
         {
             "GG_API_KEY": settings.GG_API_KEY,
             "routes": routes,
+            "stops_json": json.dumps(stops),
         },
     )
+
 
 
 def route_path_view(request):
@@ -62,3 +81,25 @@ def route_path_view(request):
     wkt = row[0]
     path = wkt_to_latlng_list(wkt)
     return JsonResponse({"path": path})
+
+@csrf_exempt
+@require_POST
+def update_stop_location(request):
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+        ma_tram = data["MaTram"]
+        lat = float(data["lat"])
+        lng = float(data["lng"])
+    except (KeyError, ValueError, json.JSONDecodeError):
+        return JsonResponse({"success": False, "error": "Invalid payload"}, status=400)
+
+    # Update tram_dung table
+    updated = TramDung.objects.filter(MaTram=ma_tram).update(
+        ViDo=lat,
+        KinhDo=lng,
+    )
+
+    if updated == 0:
+        return JsonResponse({"success": False, "error": "Stop not found"}, status=404)
+
+    return JsonResponse({"success": True})
