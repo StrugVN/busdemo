@@ -69,6 +69,12 @@
   <div id="map"></div>
   <div id="messageBox"></div>
 
+  <div id="addStopPanel" style="position:absolute;top:80px;right:10px;width:260px;
+              background:#fff;border:1px solid #ccc;border-radius:4px;
+              padding:8px;font-size:13px;z-index:999;display:none;box-shadow:0 2px 6px rgba(0,0,0,0.2);">
+  </div>
+
+
   <button id="cancelRouteChangesBtn" style="position:absolute;bottom:60px;left:calc(50% + 140px);padding:8px 14px;
                 display:none;z-index:999;
                 background:#f44336;color:white;border:none;border-radius:4px;cursor:pointer;">
@@ -87,6 +93,10 @@
 
   <script>
     const STOPS = JSON.parse('{{ stops_json|escapejs }}');
+    const ROUTES = JSON.parse('{{ routes_json|escapejs }}');
+    const ROUTE_INFO = {};
+    ROUTES.forEach(r => ROUTE_INFO[r.MaTuyen] = r);
+
 
     let map;
     let currentPolyline = null;
@@ -110,6 +120,54 @@
 
     let originalRouteBackup = null;
 
+    let pendingStopLatLng = null;
+    let routeStopsCache = [];
+
+    //
+    // TYPE 2 (Điểm dừng)  — triangles
+    //
+    const iconTriangleRed = {
+      path: "M 0,6 L -5,-3 L 5,-3 z",   // downward triangle
+      fillColor: "#d32f2f",
+      fillOpacity: 1,
+      strokeColor: "#ffffff",
+      strokeWeight: 1,
+      scale: 1.4
+    };
+
+    const iconTriangleGreen = {
+      path: "M 0,6 L -5,-3 L 5,-3 z",
+      fillColor: "#4CAF50",
+      fillOpacity: 1,
+      strokeColor: "#ffffff",
+      strokeWeight: 1,
+      scale: 1.4
+    };
+
+
+    //
+    // TYPE 1 (Bến xe) — hexagons
+    //
+    const iconHexagonRed = {
+      path: "M -5,0 L -2.5,-4.3 L 2.5,-4.3 L 5,0 L 2.5,4.3 L -2.5,4.3 z",
+      fillColor: "#d32f2f",
+      fillOpacity: 1,
+      strokeColor: "#ffffff",
+      strokeWeight: 1,
+      scale: 1.2
+    };
+
+    const iconHexagonGreen = {
+      path: "M -5,0 L -2.5,-4.3 L 2.5,-4.3 L 5,0 L 2.5,4.3 L -2.5,4.3 z",
+      fillColor: "#4CAF50",
+      fillOpacity: 1,
+      strokeColor: "#ffffff",
+      strokeWeight: 1,
+      scale: 1.2
+    };
+
+
+
     function showMessage(text, timeout = 3000) {
       const box = document.getElementById("messageBox");
       box.textContent = text;
@@ -130,39 +188,7 @@
 
       // STOP MARKERS
       STOPS.forEach(stop => {
-        const marker = new google.maps.Marker({
-          position: { lat: stop.lat, lng: stop.lng },
-          map: map,
-          title: stop.TenTram || stop.MaTram,
-        });
-
-        marker.stopData = stop;
-
-        const btnId = `change-location-${stop.MaTram}`;
-        const info = new google.maps.InfoWindow({
-          content: `
-          <button id="${btnId}" type="button"
-                  style="background:#2196F3;color:white;border:none;padding:4px 8px;border-radius:4px;margin-top:5px;cursor:pointer;">
-            Change location
-          </button>
-
-        `,
-        });
-
-        marker.addListener("click", () => {
-          info.open(map, marker);
-          google.maps.event.addListenerOnce(info, "domready", () => {
-            const btn = document.getElementById(btnId);
-            if (!btn) return;
-            btn.onclick = () => {
-              selectedStop = marker;
-              isChangingLocation = true;
-              showMessage("Click a new location on the map to move this stop.");
-            };
-          });
-        });
-
-        stopMarkers.push(marker);
+        createStopMarker(stop);
       });
 
       // MAP CLICK: used for both stop-move and route Add node
@@ -213,6 +239,17 @@
           return;
         }
       });
+
+      map.addListener("rightclick", async (event) => {
+        if (!currentRouteMaTuyen) {
+          showMessage("Select a route and direction first.", 3000);
+          return;
+        }
+
+        pendingStopLatLng = event.latLng;
+        await openAddStopPanel();
+      });
+
     }
 
     // ROUTE LOADING + DRAWING WITH DIRECTION ARROWS + START/END
@@ -383,16 +420,32 @@
 
         // NOT in edit mode → show route info + Edit button
         if (!currentRouteMaTuyen) return;
+
+        const r = ROUTE_INFO[currentRouteMaTuyen];
+
         const content = `
-          <div>
-            <b>Route ${currentRouteMaTuyen}</b><br/>
-            Direction: ${currentRouteChieu === "0" ? "Chiều đi" : "Chiều về"}<br/>
-            <button id="editRouteBtn" type="button"
-                    style="background:#2196F3;color:white;border:none;padding:5px 10px;border-radius:4px;margin-top:6px;cursor:pointer;">
-              Edit route
-            </button>
-          </div>
-        `;
+            <div>
+              <b>Route ${currentRouteMaTuyen} — ${r.TenTuyen}</b><br/>
+              Direction: ${currentRouteChieu === "0" ? "Chiều đi" : "Chiều về"}<br/><br/>
+
+              <table style="font-size:12px;">
+                <tr><td><b>Độ dài:</b></td><td>${r.DoDai ?? '–'} km</td></tr>
+                <tr><td><b>Giá vé:</b></td><td>${r.GiaVe ?? '–'} đ</td></tr>
+                <tr><td><b>Thời gian toàn tuyến:</b></td><td>${r.ThoiGianToanTuyen ?? '–'} phút</td></tr>
+                <tr><td><b>Bắt đầu:</b></td><td>${r.GioBatDay ?? '–'}</td></tr>
+                <tr><td><b>Kết thúc:</b></td><td>${r.GioKetThuc ?? '–'}</td></tr>
+                <tr><td><b>Giữa 2 chuyến:</b></td><td>${r.ThoiGianGiua2Tuyen ?? '–'} phút</td></tr>
+                <tr><td><b>Số chuyến:</b></td><td>${r.SoChuyen ?? '–'}</td></tr>
+              </table>
+
+              <button id="editRouteBtn" type="button"
+                      style="background:#2196F3;color:white;border:none;padding:5px 10px;
+                            border-radius:4px;margin-top:6px;cursor:pointer;">
+                Edit route
+              </button>
+            </div>
+          `;
+
         routeInfoWindow.setContent(content);
         routeInfoWindow.setPosition(e.latLng);
         routeInfoWindow.open(map);
@@ -415,6 +468,7 @@
         map.fitBounds(bounds);
       }
 
+      await updateStopIconsForCurrentRoute();
     }
 
     function refreshPolylineFromVertices() {
@@ -535,6 +589,276 @@
       showMessage("Changes cancelled.", 2500);
 
       exitRouteEditMode();
+    }
+
+    async function openAddStopPanel(fromStop = false) {
+      const panel = document.getElementById("addStopPanel");
+      if (!pendingStopLatLng || !currentRouteMaTuyen) return;
+
+      // Fetch existing stops on this route+direction
+      let stops = [];
+      try {
+        const res = await fetch(
+          `/route-stops/?MaTuyen=${encodeURIComponent(currentRouteMaTuyen)}&Chieu=${encodeURIComponent(currentRouteChieu)}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          stops = data.stops || [];
+        }
+      } catch (e) {
+        console.error(e);
+      }
+      routeStopsCache = stops;
+
+      const stopsHtml =
+        stops.length === 0
+          ? "<i>None yet (only start station)</i>"
+          : stops
+            .map(
+              (s) =>
+                `${s.STT}. ${s.TenTram || s.MaTram}`
+            )
+            .join("<br/>");
+
+      let existingOptions = `<option value="">-- New stop point --</option>`;
+      stops.forEach((s) => {
+        existingOptions += `<option value="${s.MaTram}">${s.STT}. ${s.TenTram || s.MaTram}</option>`;
+      });
+
+      const lat = pendingStopLatLng.lat().toFixed(6);
+      const lng = pendingStopLatLng.lng().toFixed(6);
+
+      panel.innerHTML = `
+        <div>
+          <b>Add stop</b><br/>
+          Route ${currentRouteMaTuyen} (${currentRouteChieu === "0" ? "Chiều đi" : "Chiều về"})<br/>
+          <small>Click at: ${lat}, ${lng}</small>
+          <div style="margin-top:6px;max-height:80px;overflow:auto;border:1px solid #eee;padding:4px;">
+            <b>Existing stops on this path:</b><br/>
+            ${stopsHtml}
+          </div>
+          <div style="margin-top:6px;">
+            <label style="font-size:12px;">Use existing stop:</label><br/>
+            <select id="existingStopSelect" style="width:100%;padding:3px 4px;">
+              ${existingOptions}
+            </select>
+          </div>
+          <div id="newStopFields" style="margin-top:6px;">
+            <label style="font-size:12px;">New stop name:</label><br/>
+            <input id="newStopName" type="text" style="width:100%;padding:3px 4px;margin-bottom:4px;" />
+            <label style="font-size:12px;">Type:</label><br/>
+            <select id="newStopType" style="width:100%;padding:3px 4px;">
+              <option value="1">Bến xe</option>
+              <option value="2" selected>Điểm dừng</option>
+            </select>
+          </div>
+          <div style="margin-top:8px;text-align:right;">
+            <button id="saveStopBtn" type="button"
+                    style="background:#2196F3;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;">
+              Save stop
+            </button>
+            <button id="cancelStopBtn" type="button"
+                    style="background:#ccc;color:black;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;margin-left:6px;">
+              Cancel
+            </button>
+          </div>
+        </div>
+      `;
+      panel.style.display = "block";
+
+      const select = document.getElementById("existingStopSelect");
+      const newFields = document.getElementById("newStopFields");
+
+      // Hide/show new fields when selecting existing stop
+      select.addEventListener("change", () => {
+        newFields.style.display = select.value ? "none" : "block";
+      });
+
+      // If right-clicking an existing stop → auto-select it
+      if (fromStop && pendingRightClickStop) {
+        select.value = pendingRightClickStop.MaTram;
+        newFields.style.display = "none";
+      }
+
+      document.getElementById("cancelStopBtn").onclick = () => {
+        panel.style.display = "none";
+        pendingStopLatLng = null;
+        pendingRightClickStop = null;
+      };
+
+      document.getElementById("saveStopBtn").onclick = saveStopFromPanel;
+
+    }
+
+    async function saveStopFromPanel() {
+      const panel = document.getElementById("addStopPanel");
+      if (!pendingStopLatLng || !currentRouteMaTuyen) return;
+
+      const existingMaTram = document.getElementById("existingStopSelect").value || null;
+      let name = null;
+      let type = null;
+
+      if (!existingMaTram) {
+        name = document.getElementById("newStopName").value.trim();
+        type = document.getElementById("newStopType").value;
+        if (!name) {
+          showMessage("Please enter a name for the new stop.", 3000);
+          return;
+        }
+      }
+
+      const body = {
+        MaTuyen: currentRouteMaTuyen,
+        Chieu: currentRouteChieu,
+        lat: pendingStopLatLng.lat(),
+        lng: pendingStopLatLng.lng(),
+        ExistingMaTram: existingMaTram,
+        TenTram: name,
+        MaLoai: type,
+      };
+
+      try {
+        const res = await fetch("/add-route-stop/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          showMessage("Failed to add stop: " + data.error, 5000);
+          return;
+        }
+
+        // If new stop created, add marker
+        if (data.stop && !existingMaTram) {
+          const s = data.stop;
+          const stopObj = {
+            MaTram: s.MaTram,
+            TenTram: s.TenTram,
+            lat: s.lat,
+            lng: s.lng,
+          };
+          STOPS.push(stopObj);
+          createStopMarker(stopObj); // we'll refactor your marker creation into a function
+          updateStopIconsForCurrentRoute();
+        }
+
+        showMessage("Stop added to route.", 3000);
+        panel.style.display = "none";
+        pendingStopLatLng = null;
+
+        updateStopIconsForCurrentRoute();
+      } catch (err) {
+        console.error(err);
+        showMessage("Error adding stop.", 5000);
+      }
+    }
+
+    function createStopMarker(stop) {
+      // default icon based on stop type (off-route)
+      let baseIcon =
+        stop.MaLoai == 1 ? iconHexagonRed : iconTriangleRed;
+
+      const marker = new google.maps.Marker({
+        position: { lat: stop.lat, lng: stop.lng },
+        map: map,
+        title: stop.TenTram || stop.MaTram,
+        icon: baseIcon,
+      });
+
+
+      marker.stopData = stop;
+
+      const stopType = String(stop.MaLoai) === "1" ? "Bến xe" : "Điểm dừng";
+
+      const btnId = `change-location-${stop.MaTram}`;
+      const info = new google.maps.InfoWindow({
+        content: `
+            <div>
+              <b>${stop.TenTram || stop.MaTram}</b><br/>
+              Mã trạm: ${stop.MaTram}<br/>
+              Loại: <b>${stopType}</b><br/>
+              <button id="${btnId}" type="button"
+                      style="background:#2196F3;color:white;border:none;padding:4px 8px;
+                            border-radius:4px;margin-top:5px;cursor:pointer;">
+                Change location
+              </button>
+            </div>
+          `,
+      });
+
+      marker.addListener("click", () => {
+        info.open(map, marker);
+        google.maps.event.addListenerOnce(info, "domready", () => {
+          const btn = document.getElementById(btnId);
+          if (!btn) return;
+          btn.onclick = () => {
+            selectedStop = marker;
+            isChangingLocation = true;
+            showMessage("Click a new location on the map to move this stop.");
+          };
+        });
+      });
+
+      marker.addListener("rightclick", () => {
+        if (!currentRouteMaTuyen) {
+          showMessage("Select a route + direction first.", 3000);
+          return;
+        }
+
+        // load stop into pending
+        pendingStopLatLng = marker.getPosition();
+        pendingRightClickStop = stop;    // NEW: store full stop object
+
+        openAddStopPanel(true);  // tell panel we came from a stop
+      });
+
+
+      stopMarkers.push(marker);
+    }
+
+    async function updateStopIconsForCurrentRoute() {
+      if (!currentRouteMaTuyen) {
+        // no route selected -> all stops off-route
+        stopMarkers.forEach(m => m.setIcon(stopIconOffRoute));
+        return;
+      }
+
+      try {
+        const res = await fetch(
+          `/route-stops/?MaTuyen=${encodeURIComponent(currentRouteMaTuyen)}&Chieu=${encodeURIComponent(currentRouteChieu)}`
+        );
+        if (!res.ok) {
+          console.error("Failed to load route stops", await res.text());
+          return;
+        }
+        const data = await res.json();
+        const stops = data.stops || [];
+
+        const onRouteSet = new Set(stops.map(s => s.MaTram));
+
+        stopMarkers.forEach(marker => {
+          const maTram = marker.stopData?.MaTram;
+          if (maTram && onRouteSet.has(maTram)) {
+            // on-route
+            if (marker.stopData.MaLoai == 1) {
+              marker.setIcon(iconHexagonGreen);   // station
+            } else {
+              marker.setIcon(iconTriangleGreen);  // normal stop
+            }
+          } else {
+            // off-route
+            if (marker.stopData.MaLoai == 1) {
+              marker.setIcon(iconHexagonRed);
+            } else {
+              marker.setIcon(iconTriangleRed);
+            }
+          }
+
+        });
+      } catch (err) {
+        console.error("Error updating stop icons:", err);
+      }
     }
 
 

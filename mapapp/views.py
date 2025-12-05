@@ -5,7 +5,7 @@ from django.db import connection
 import json
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
-
+import math
 from .models import TuyenBus, TramDung
 
 
@@ -34,32 +34,63 @@ def wkt_to_latlng_list(wkt: str):
 
 
 def map_view(request):
-    # Routes for dropdown
-    routes = list(TuyenBus.objects.values("MaTuyen", "TenTuyen"))
+    # 1) Load ALL stops (for markers)
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT MaTram, TenTram, ViDo, KinhDo, MaLoai
+            FROM tram_dung
+        """)
+        rows = cursor.fetchall()
 
-    # All stops
-    stops_qs = TramDung.objects.values("MaTram", "TenTram", "KinhDo", "ViDo")
-    # Filter out rows without coords, just in case
-    stops = [
-        {
-            "MaTram": s["MaTram"],
-            "TenTram": s["TenTram"],
-            "lat": s["ViDo"],
-            "lng": s["KinhDo"],
-        }
-        for s in stops_qs
-        if s["KinhDo"] is not None and s["ViDo"] is not None
-    ]
+    stops = []
+    for r in rows:
+        stops.append({
+            "MaTram": r[0],
+            "TenTram": r[1],
+            "lat": r[2],       # ViDo
+            "lng": r[3],       # KinhDo
+            "MaLoai": r[4],    # 1 = Bến xe, 2 = Điểm dừng
+        })
 
-    return render(
-        request,
-        "map.html",
-        {
-            "GG_API_KEY": settings.GG_API_KEY,
-            "routes": routes,
-            "stops_json": json.dumps(stops),
-        },
-    )
+    # 2) Load routes WITH full info
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT
+                MaTuyen,
+                TenTuyen,
+                DoDai,
+                GiaVe,
+                ThoiGianToanTuyen,
+                GioBatDay,
+                GioKetThuc,
+                ThoiGianGiua2Tuyen,
+                SoChuyen
+            FROM tuyen_bus
+        """)
+        rows = cursor.fetchall()
+
+    routes = []
+    for r in rows:
+        routes.append({
+            "MaTuyen": r[0],
+            "TenTuyen": r[1],
+            "DoDai": r[2],
+            "GiaVe": r[3],
+            "ThoiGianToanTuyen": r[4],
+            "GioBatDay": r[5],
+            "GioKetThuc": r[6],
+            "ThoiGianGiua2Tuyen": r[7],
+            "SoChuyen": r[8],
+        })
+
+    # 3) Send everything to template
+    context = {
+        "routes": routes,                         # for the <select> dropdown
+        "routes_json": json.dumps(routes),        # for JS ROUTE_INFO lookup
+        "stops_json": json.dumps(stops),          # for JS STOPS / markers
+        "GG_API_KEY": settings.GG_API_KEY,
+    }
+    return render(request, "map.html", context)
 
 
 
@@ -147,3 +178,181 @@ def update_route_geometry(request):
         return JsonResponse({"success": False, "error": "Route not found"}, status=404)
 
     return JsonResponse({"success": True})
+
+def haversine_meters(lon1, lat1, lon2, lat2):
+    R = 6371000.0  # meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+def route_stops_view(request):
+    ma_tuyen = request.GET.get("MaTuyen")
+    chieu = request.GET.get("Chieu", "0")
+
+    if not ma_tuyen:
+        return JsonResponse({"error": "MaTuyen is required"}, status=400)
+
+    try:
+        chieu_int = int(chieu)
+    except ValueError:
+        return JsonResponse({"error": "Invalid Chieu"}, status=400)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT t.MaTram, t.STT, t.KhoangCachDenTramTiepTheo,
+                   d.TenTram, d.KinhDo, d.ViDo, d.MaLoai
+            FROM tuyen_tram t
+            LEFT JOIN tram_dung d ON t.MaTram = d.MaTram
+            WHERE t.MaTuyen = %s AND t.Chieu = %s
+            ORDER BY t.STT
+            """,
+            [ma_tuyen, chieu_int],
+        )
+        rows = cursor.fetchall()
+
+    stops = []
+    for r in rows:
+        stops.append(
+            {
+                "MaTram": r[0],
+                "STT": r[1],
+                "KhoangCachDenTramTiepTheo": r[2],
+                "TenTram": r[3],
+                "KinhDo": r[4],
+                "ViDo": r[5],
+                "MaLoai": r[6],
+            }
+        )
+
+    return JsonResponse({"stops": stops})
+
+@csrf_exempt
+@require_POST
+def add_route_stop_view(request):
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+        ma_tuyen = data["MaTuyen"]
+        chieu = int(data["Chieu"])
+        lat = float(data["lat"])
+        lng = float(data["lng"])
+        existing_ma_tram = data.get("ExistingMaTram") or None
+        ten_tram = data.get("TenTram")
+        ma_loai = data.get("MaLoai")  # "1" or "2"
+    except (KeyError, ValueError, json.JSONDecodeError) as e:
+        return JsonResponse({"success": False, "error": f"Invalid payload: {e}"}, status=400)
+
+    if not ma_tuyen:
+        return JsonResponse({"success": False, "error": "MaTuyen is required"}, status=400)
+
+    with connection.cursor() as cursor:
+        # 1) Determine MaTram
+        if existing_ma_tram:
+            ma_tram = existing_ma_tram
+        else:
+            if not ten_tram or not ma_loai:
+                return JsonResponse(
+                    {"success": False, "error": "TenTram and MaLoai required for new stop"},
+                    status=400,
+                )
+
+            # Find next index for this route's stops: pattern "11_XXX"
+            cursor.execute(
+                "SELECT MaTram FROM tram_dung WHERE MaTram LIKE %s ORDER BY MaTram DESC LIMIT 1",
+                (ma_tuyen + "_%",),
+            )
+            row = cursor.fetchone()
+            if row:
+                last = row[0]  # e.g. "11_005"
+                try:
+                    suffix = int(last.split("_")[1])
+                except Exception:
+                    suffix = 0
+            else:
+                suffix = 0
+            next_idx = suffix + 1
+            ma_tram = f"{ma_tuyen}_{next_idx:03d}"
+
+            # Insert into tram_dung
+            cursor.execute(
+                """
+                INSERT INTO tram_dung (MaTram, MaLoai, MaXa, TenTram, KinhDo, ViDo, DiaChi)
+                VALUES (%s, %s, NULL, %s, %s, %s, NULL)
+                """,
+                [ma_tram, ma_loai, ten_tram, lng, lat],
+            )
+
+        # 2) Determine new STT for this (route, direction)
+        cursor.execute(
+            "SELECT MAX(STT) FROM tuyen_tram WHERE MaTuyen = %s AND Chieu = %s",
+            [ma_tuyen, chieu],
+        )
+        row = cursor.fetchone()
+        prev_stt = row[0] or 0
+        new_stt = prev_stt + 1
+
+        # 3) Insert into tuyen_tram (new stop at the end)
+        cursor.execute(
+            """
+            INSERT INTO tuyen_tram (MaTuyen, MaTram, STT, KhoangCachDenTramTiepTheo, Chieu)
+            VALUES (%s, %s, %s, NULL, %s)
+            """,
+            [ma_tuyen, ma_tram, new_stt, chieu],
+        )
+
+        # 4) Update distance from previous stop (if any)
+        if prev_stt > 0:
+            cursor.execute(
+                """
+                SELECT MaTram FROM tuyen_tram
+                WHERE MaTuyen = %s AND Chieu = %s AND STT = %s
+                """,
+                [ma_tuyen, chieu, prev_stt],
+            )
+            r2 = cursor.fetchone()
+            if r2:
+                prev_ma_tram = r2[0]
+
+                cursor.execute(
+                    "SELECT ViDo, KinhDo FROM tram_dung WHERE MaTram = %s", [prev_ma_tram]
+                )
+                prev_row = cursor.fetchone()
+                cursor.execute(
+                    "SELECT ViDo, KinhDo FROM tram_dung WHERE MaTram = %s", [ma_tram]
+                )
+                cur_row = cursor.fetchone()
+
+                if prev_row and cur_row:
+                    lat1, lng1 = prev_row[0], prev_row[1]
+                    lat2, lng2 = cur_row[0], cur_row[1]
+                    dist_m = haversine_meters(lng1, lat1, lng2, lat2)
+
+                    cursor.execute(
+                        """
+                        UPDATE tuyen_tram
+                        SET KhoangCachDenTramTiepTheo = %s
+                        WHERE MaTuyen = %s AND MaTram = %s AND Chieu = %s
+                        """,
+                        [float(dist_m), ma_tuyen, prev_ma_tram, chieu],
+                    )
+
+    # Return info about the stop (useful for adding marker on map)
+    return JsonResponse(
+        {
+            "success": True,
+            "stop": {
+                "MaTram": ma_tram,
+                "TenTram": ten_tram,
+                "MaLoai": ma_loai,
+                "lat": lat,
+                "lng": lng,
+            },
+        }
+    )
+
+
