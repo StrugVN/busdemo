@@ -1,0 +1,15 @@
+
+{
+  "status": "success",
+  "data": [
+    {
+      "id": "150",
+      "MaTuyenXe": "07",
+      "TenHanhTrinh": "BX Trà Men - Vĩnh Châu",
+      "GhiChu": null,
+      "NgayCapNhat": "2024-09-20 10:29:49.000",
+      "NguoiCapNhat": "1",
+      "MaHanhTrinh": "107"
+    }
+  ]
+}

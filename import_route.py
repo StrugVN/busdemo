@@ -45,32 +45,54 @@ def load_info(route_code, base_dir="."):
 
 def load_path_wkt(route_code, base_dir="."):
     """
-    Read {MaTuyen}_path.json and build WKT LINESTRING or MULTILINESTRING.
+    Read {MaTuyen}_path.json but extract the REAL route path
+    by selecting the longest polyline and ignoring decorative circles.
     """
     path = os.path.join(base_dir, f"{route_code}_path.json")
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    features = data["features"]
+    features = data.get("features", [])
     if not features:
         raise ValueError("No features in path json")
 
-    paths = features[0]["geometry"]["paths"]  # list of paths
+    paths = features[0]["geometry"]["paths"]
+    if not paths:
+        raise ValueError("Empty 'paths' list")
 
-    wkt_parts = []
+    # Convert each path to WGS84 and compute length
+    longest_path = None
+    longest_dist = -1
+
     for path_coords in paths:
-        coord_strs = []
+        wgs_points = []
+        dist = 0.0
+
+        prev_lon = prev_lat = None
+
         for x, y in path_coords:
             lon, lat = mercator_to_wgs84(x, y)
-            coord_strs.append(f"{lon} {lat}")
-        wkt_parts.append("(" + ", ".join(coord_strs) + ")")
+            wgs_points.append((lon, lat))
 
-    if len(wkt_parts) == 1:
-        wkt = "LINESTRING " + wkt_parts[0]
-    else:
-        wkt = "MULTILINESTRING (" + ", ".join(wkt_parts) + ")"
+            # compute incremental distance
+            if prev_lon is not None:
+                dx = lon - prev_lon
+                dy = lat - prev_lat
+                dist += math.hypot(dx, dy)
+
+            prev_lon, prev_lat = lon, lat
+
+        # choose longest
+        if dist > longest_dist:
+            longest_dist = dist
+            longest_path = wgs_points
+
+    # build WKT for the *real* route line
+    coord_str = ", ".join(f"{lon} {lat}" for lon, lat in longest_path)
+    wkt = f"LINESTRING ({coord_str})"
 
     return wkt
+
 
 
 def load_stops(route_code, base_dir="."):
@@ -136,14 +158,16 @@ def import_route(route_code, base_dir="."):
         cur.execute(sql_route, (ma_tuyen, ten_tuyen, path_wkt))
 
         # 2) Insert/Update tram_dung
+        # 2) Insert/Update tram_dung
         for stop in stops:
             sql_stop = """
-                INSERT INTO tram_dung (MaTram, TenTram, KinhDo, ViDo)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO tram_dung (MaTram, TenTram, KinhDo, ViDo, MaLoai)
+                VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     TenTram = VALUES(TenTram),
                     KinhDo = VALUES(KinhDo),
-                    ViDo = VALUES(ViDo)
+                    ViDo   = VALUES(ViDo),
+                    MaLoai = VALUES(MaLoai)
             """
             cur.execute(
                 sql_stop,
@@ -152,20 +176,49 @@ def import_route(route_code, base_dir="."):
                     stop["TenTram"],
                     stop["KinhDo"],
                     stop["ViDo"],
+                    stop.get("MaLoai", 2),  # default to type 2 if missing
                 ),
             )
 
+
         # 3) Rebuild tuyen_tram entries for this route
         cur.execute("DELETE FROM tuyen_tram WHERE MaTuyen = %s", (ma_tuyen,))
-        sql_link = """
-            INSERT INTO tuyen_tram (MaTuyen, MaTram, STT, KhoangCachDenTramTiepTheo, Chieu)
-            VALUES (%s, %s, %s, %s, %s)
-        """
-        for stop in stops:
-            cur.execute(
-                sql_link,
-                (ma_tuyen, stop["MaTram"], stop["STT"], None, 0),
-            )
+
+        # 3) Insert into tuyen_tram
+        if len(stops) == 2:
+            # Special case: two terminal stations, each is start of one direction.
+            # Convention (per your note):
+            #  - first stop  -> Chieu = 1, STT = 1
+            #  - second stop -> Chieu = 0, STT = 1
+            station1 = stops[0]
+            station2 = stops[1]
+
+            sql_tt = """
+                INSERT INTO tuyen_tram (MaTuyen, MaTram, STT, KhoangCachDenTramTiepTheo, Chieu)
+                VALUES (%s, %s, %s, NULL, %s)
+                ON DUPLICATE KEY UPDATE
+                    STT   = VALUES(STT),
+                    Chieu = VALUES(Chieu)
+            """
+
+            # first feature -> Chieu = 1, STT = 1
+            cur.execute(sql_tt, (ma_tuyen, station1["MaTram"], 1, 1))
+
+            # second feature -> Chieu = 0, STT = 1
+            cur.execute(sql_tt, (ma_tuyen, station2["MaTram"], 1, 0))
+
+        else:
+            # Default behavior for routes where diemdung contains the whole sequence
+            sql_tt = """
+                INSERT INTO tuyen_tram (MaTuyen, MaTram, STT, KhoangCachDenTramTiepTheo, Chieu)
+                VALUES (%s, %s, %s, NULL, %s)
+                ON DUPLICATE KEY UPDATE
+                    STT   = VALUES(STT),
+                    Chieu = VALUES(Chieu)
+            """
+            for idx, stop in enumerate(stops):
+                cur.execute(sql_tt, (ma_tuyen, stop["MaTram"], idx + 1, 0))
+
 
         conn.commit()
         print("✅ Import done, transaction committed.")
