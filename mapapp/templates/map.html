@@ -69,6 +69,14 @@
   <div id="map"></div>
   <div id="messageBox"></div>
 
+  <button id="applyRouteChangesBtn"
+          style="position:absolute;bottom:60px;left:50%;transform:translateX(-50%);
+                padding:8px 14px;display:none;z-index:999;
+                background:#2196F3;color:white;border:none;border-radius:4px;cursor:pointer;">
+    Apply changes
+  </button>
+
+
   <!-- Google Maps JS with key from .env -->
   <script src="https://maps.googleapis.com/maps/api/js?key={{ GG_API_KEY }}"></script>
 
@@ -79,31 +87,41 @@
     let currentPolyline = null;
     let stopMarkers = [];
 
+    // stop editing state
     let selectedStop = null;
     let isChangingLocation = false;
+
+    // route editing state
+    let editMode = false;
+    let routeVertices = [];        // [{lat, lng}, ...] currently shown route
+    let vertexMarkers = [];        // draggable markers for vertices
+    let selectedVertexIndex = null;
+    let awaitingAddNodeClick = false;
+    let currentRouteMaTuyen = null;
+    let currentRouteChieu = "0";   // "0" đi, "1" về
+
     let messageTimeoutId = null;
+    let routeInfoWindow = null;
 
     function showMessage(text, timeout = 3000) {
       const box = document.getElementById("messageBox");
       box.textContent = text;
       box.style.display = "block";
 
-      if (messageTimeoutId) {
-        clearTimeout(messageTimeoutId);
-      }
+      if (messageTimeoutId) clearTimeout(messageTimeoutId);
       messageTimeoutId = setTimeout(() => {
         box.style.display = "none";
       }, timeout);
     }
 
     function initMap() {
-      const center = { lat: 10.776, lng: 106.700 }; // adjust default if needed
+      const center = { lat: 10.776, lng: 106.700 }; // adjust
       map = new google.maps.Map(document.getElementById("map"), {
         zoom: 12,
         center: center,
       });
 
-      // Add markers for all stops (independent from routes)
+      // STOP MARKERS
       STOPS.forEach(stop => {
         const marker = new google.maps.Marker({
           position: { lat: stop.lat, lng: stop.lng },
@@ -111,30 +129,24 @@
           title: stop.TenTram || stop.MaTram,
         });
 
-        // Save stop data on the marker
         marker.stopData = stop;
 
-        // Unique button id for this stop
         const btnId = `change-location-${stop.MaTram}`;
-
         const info = new google.maps.InfoWindow({
           content: `
-            <div>
-              <b>${stop.TenTram || stop.MaTram}</b><br/>
-              Mã trạm: ${stop.MaTram}<br/>
-              <button id="${btnId}" type="button">Change location</button>
-            </div>
-          `,
+          <button id="${btnId}" type="button"
+                  style="background:#2196F3;color:white;border:none;padding:4px 8px;border-radius:4px;margin-top:5px;cursor:pointer;">
+            Change location
+          </button>
+
+        `,
         });
 
         marker.addListener("click", () => {
           info.open(map, marker);
-
-          // Wait until DOM for InfoWindow is ready, then attach click handler
           google.maps.event.addListenerOnce(info, "domready", () => {
             const btn = document.getElementById(btnId);
             if (!btn) return;
-
             btn.onclick = () => {
               selectedStop = marker;
               isChangingLocation = true;
@@ -146,55 +158,73 @@
         stopMarkers.push(marker);
       });
 
-      // Map click: if we're in "change location" mode, move marker and update DB
+      // MAP CLICK: used for both stop-move and route Add node
       map.addListener("click", (event) => {
-        if (!isChangingLocation || !selectedStop) return;
-
         const newLatLng = event.latLng;
 
-        // Move marker visually
-        selectedStop.setPosition(newLatLng);
-
-        // Update the internal stop data too
-        selectedStop.stopData.lat = newLatLng.lat();
-        selectedStop.stopData.lng = newLatLng.lng();
-
-        isChangingLocation = false;
-
-        showMessage("Saving new location...");
-
-        // Send AJAX to backend to persist change
-        fetch("/update-stop-location/", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            MaTram: selectedStop.stopData.MaTram,
+        // 1) route Add node (highest priority)
+        if (editMode && awaitingAddNodeClick && selectedVertexIndex !== null) {
+          const insertIndex = selectedVertexIndex; // insert before selected
+          routeVertices.splice(insertIndex, 0, {
             lat: newLatLng.lat(),
             lng: newLatLng.lng(),
-          }),
-        })
-          .then((res) => res.json())
-          .then((data) => {
-            if (!data.success) {
-              console.error("DB update failed:", data.error);
-              showMessage("Marker moved, but DB update failed: " + data.error, 5000);
-            } else {
-              console.log("DB updated successfully");
-              showMessage("Stop location updated.", 2500);
-            }
-          })
-          .catch((err) => {
-            console.error("Request error:", err);
-            showMessage("Marker moved, but error updating DB.", 5000);
           });
+          awaitingAddNodeClick = false;
+          selectedVertexIndex = null;
+          rebuildVertexMarkers();
+          refreshPolylineFromVertices();
+          showMessage("Node added.", 2000);
+          return;
+        }
+
+        // 2) stop location change
+        if (isChangingLocation && selectedStop) {
+          selectedStop.setPosition(newLatLng);
+          selectedStop.stopData.lat = newLatLng.lat();
+          selectedStop.stopData.lng = newLatLng.lng();
+          isChangingLocation = false;
+
+          showMessage("Saving new stop location...");
+
+          fetch("/update-stop-location/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              MaTram: selectedStop.stopData.MaTram,
+              lat: newLatLng.lat(),
+              lng: newLatLng.lng(),
+            }),
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              if (!data.success) {
+                showMessage("Stop moved, but DB update failed: " + data.error, 5000);
+              } else {
+                showMessage("Stop location updated.", 2500);
+              }
+            })
+            .catch((err) => {
+              console.error(err);
+              showMessage("Stop moved, but error updating DB.", 5000);
+            });
+
+          return;
+        }
       });
     }
 
+    // ROUTE LOADING + DRAWING WITH DIRECTION ARROWS + START/END
     async function loadAndDrawRoute() {
       const maTuyen = document.getElementById("routeSelect").value;
       const chieu = document.getElementById("directionSelect").value;
+
+      currentRouteMaTuyen = maTuyen || null;
+      currentRouteChieu = chieu;
+
+      // exit edit mode if switching route/direction
+      if (editMode) {
+        exitRouteEditMode();
+      }
 
       if (!maTuyen) {
         if (currentPolyline) {
@@ -210,41 +240,40 @@
         showMessage("Failed to load route", 4000);
         return;
       }
-
       const data = await res.json();
       const path = data.path || [];
-
       if (!path.length) {
         showMessage("Route has no path geometry.", 3000);
         return;
       }
 
+      routeVertices = path.slice(); // keep a copy for editing
+
       if (currentPolyline) {
         currentPolyline.setMap(null);
+        currentPolyline = null;
       }
 
-      const start = path[0];
-      const end = path[path.length - 1];
+      const start = routeVertices[0];
+      const end = routeVertices[routeVertices.length - 1];
 
       currentPolyline = new google.maps.Polyline({
-        path: path,
+        path: routeVertices,
         map: map,
-        strokeWeight: 4,
+        strokeWeight: 2,
         strokeColor: "#0d47a1",
-
         icons: [
-          // Direction arrows
+          // direction arrows
           {
             icon: {
               path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
               scale: 2.5,
-              strokeOpacity: 0.9
+              strokeOpacity: 0.9,
             },
-            offset: "10%",
-            repeat: "10%"
+            offset: "5%",
+            repeat: "5%",
           },
-
-          // START POINT — blue dot
+          // start = blue dot
           {
             icon: {
               path: google.maps.SymbolPath.CIRCLE,
@@ -252,29 +281,238 @@
               fillColor: "#0000ff",
               fillOpacity: 1,
               strokeColor: "#0000ff",
-              strokeWeight: 1
+              strokeWeight: 1,
             },
-            offset: "0%"     // very start
+            offset: "0%",
           },
-
-          // END POINT — red dot
+          // end = red X
           {
             icon: {
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 4,
-              fillColor: "#ff0000",
-              fillOpacity: 1,
+              path: "M -2,-2 L 2,2 M 2,-2 L -2,2",
               strokeColor: "#ff0000",
-              strokeWeight: 1
+              strokeWeight: 2,
+              scale: 2.5,
             },
-            offset: "100%"   // end of the line
-          }
-        ]
+            offset: "100%",
+          },
+        ],
+      });
+
+      // click on route → show info + Edit button
+      if (!routeInfoWindow) {
+        routeInfoWindow = new google.maps.InfoWindow();
+      }
+      currentPolyline.addListener("click", (e) => {
+        if (!currentRouteMaTuyen) return;
+        const content = `
+        <div>
+          <b>Route ${currentRouteMaTuyen}</b><br/>
+          Direction: ${currentRouteChieu === "0" ? "Chiều đi" : "Chiều về"}<br/>
+          <button id="editRouteBtn" type="button"
+                  style="background:#2196F3;color:white;border:none;padding:5px 10px;border-radius:4px;margin-top:6px;cursor:pointer;">
+            Edit route
+          </button>
+        </div>
+      `;
+        routeInfoWindow.setContent(content);
+        routeInfoWindow.setPosition(e.latLng);
+        routeInfoWindow.open(map);
+
+        google.maps.event.addListenerOnce(routeInfoWindow, "domready", () => {
+          const btn = document.getElementById("editRouteBtn");
+          if (!btn) return;
+          btn.onclick = () => {
+            enterRouteEditMode();
+            routeInfoWindow.close();
+          };
+        });
       });
 
       const bounds = new google.maps.LatLngBounds();
-      path.forEach(pt => bounds.extend(pt));
-      map.fitBounds(bounds);
+      routeVertices.forEach(pt => bounds.extend(pt));
+
+      // only recenter if route is NOT currently visible
+      if (!isRouteVisible(bounds)) {
+        map.fitBounds(bounds);
+      }
+
+    }
+
+    function refreshPolylineFromVertices() {
+      if (!currentPolyline) return;
+      currentPolyline.setPath(routeVertices);
+    }
+
+    // ROUTE EDIT MODE
+    function enterRouteEditMode() {
+      if (!currentPolyline || !routeVertices.length || !currentRouteMaTuyen) {
+        showMessage("No route to edit.");
+        return;
+      }
+      if (editMode) return;
+      editMode = true;
+      awaitingAddNodeClick = false;
+      selectedVertexIndex = null;
+      showMessage("Route edit mode: drag red dots, click a dot to Add/Delete node.");
+
+      document.getElementById("applyRouteChangesBtn").style.display = "block";
+      document.getElementById("applyRouteChangesBtn").textContent =
+        `Apply changes to route ${currentRouteMaTuyen}`;
+
+      rebuildVertexMarkers();
+    }
+
+    function exitRouteEditMode() {
+      editMode = false;
+      awaitingAddNodeClick = false;
+      selectedVertexIndex = null;
+
+      vertexMarkers.forEach(m => m.setMap(null));
+      vertexMarkers = [];
+
+      const btn = document.getElementById("applyRouteChangesBtn");
+      if (btn) btn.style.display = "none";
+    }
+
+    function rebuildVertexMarkers() {
+      // remove old markers
+      vertexMarkers.forEach(m => m.setMap(null));
+      vertexMarkers = [];
+
+      routeVertices.forEach((pt, idx) => {
+        const marker = new google.maps.Marker({
+          position: pt,
+          map: map,
+          draggable: true,
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 3.5,
+            fillColor: "#ff0000",
+            fillOpacity: 1,
+            strokeColor: "#ffffff",
+            strokeWeight: 1,
+          },
+          zIndex: 1000,
+        });
+
+        marker.addListener("dragend", (e) => {
+          const pos = e.latLng;
+          routeVertices[idx] = { lat: pos.lat(), lng: pos.lng() };
+          refreshPolylineFromVertices();
+        });
+
+        marker.addListener("click", () => {
+          selectedVertexIndex = idx;
+          const info = new google.maps.InfoWindow({
+            content: `
+              <div>
+                <b>Node #${idx}</b><br/>
+                <button id="addNodeBtn" type="button" 
+                        style="background:#4CAF50;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;">
+                  Add node
+                </button>
+                <button id="delNodeBtn" type="button" 
+                        style="background:#f44336;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;margin-left:6px;">
+                  Delete node
+                </button>
+                <button id="delNodeBeyondBtn" type="button"
+                        style="background:#f44336;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;margin-left:6px;">
+                  Delete node and beyond
+                </button>
+              </div>
+            `,
+          });
+          info.open(map, marker);
+
+          google.maps.event.addListenerOnce(info, "domready", () => {
+            const addBtn = document.getElementById("addNodeBtn");
+            const delBtn = document.getElementById("delNodeBtn");
+            const delBeyondBtn = document.getElementById("delNodeBeyondBtn");
+
+            if (addBtn) {
+              addBtn.onclick = () => {
+                awaitingAddNodeClick = true;
+                showMessage("Click on the map to insert a new node before this one.");
+              };
+            }
+
+            if (delBtn) {
+              delBtn.onclick = () => {
+                if (routeVertices.length <= 2) {
+                  showMessage("Cannot delete, route needs at least 2 points.", 4000);
+                  return;
+                }
+                routeVertices.splice(idx, 1);
+                selectedVertexIndex = null;
+                info.close();
+                rebuildVertexMarkers();
+                refreshPolylineFromVertices();
+                showMessage("Node deleted.", 2000);
+              };
+            }
+
+            if (delBeyondBtn) {
+              delBeyondBtn.onclick = () => {
+                if (idx === 0) {
+                  showMessage("Cannot delete from first node; route would be empty.", 4000);
+                  return;
+                }
+                if (routeVertices.length - idx < 2) {
+                  showMessage("Need at least two nodes left on the route.", 4000);
+                  return;
+                }
+                // keep nodes [0 .. idx-1], drop idx and everything after
+                routeVertices = routeVertices.slice(0, idx);
+                selectedVertexIndex = null;
+                info.close();
+                rebuildVertexMarkers();
+                refreshPolylineFromVertices();
+                showMessage("Node and all following nodes deleted.", 2000);
+              };
+            }
+          });
+        });
+
+        vertexMarkers.push(marker);
+      });
+    }
+
+    // APPLY CHANGES TO DB
+
+    async function applyRouteChanges() {
+      if (!editMode || !currentRouteMaTuyen || routeVertices.length < 2) {
+        showMessage("Nothing to apply.", 3000);
+        return;
+      }
+      showMessage("Saving route geometry...");
+
+      try {
+        const res = await fetch("/update-route-geometry/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            MaTuyen: currentRouteMaTuyen,
+            Chieu: currentRouteChieu,
+            path: routeVertices,
+          }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          showMessage("Failed to save route: " + data.error, 5000);
+          return;
+        }
+        showMessage("Route geometry saved.", 3000);
+        exitRouteEditMode();
+      } catch (err) {
+        console.error(err);
+        showMessage("Error saving route geometry.", 5000);
+      }
+    }
+
+    function isRouteVisible(bounds) {
+      const mapBounds = map.getBounds();
+      if (!mapBounds) return false;
+      return mapBounds.intersects(bounds);
     }
 
 
@@ -283,9 +521,11 @@
 
       document.getElementById("routeSelect").addEventListener("change", loadAndDrawRoute);
       document.getElementById("directionSelect").addEventListener("change", loadAndDrawRoute);
-    };
 
+      document.getElementById("applyRouteChangesBtn").addEventListener("click", applyRouteChanges);
+    };
   </script>
+
 </body>
 
 </html>

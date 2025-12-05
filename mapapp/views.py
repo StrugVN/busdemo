@@ -105,3 +105,45 @@ def update_stop_location(request):
         return JsonResponse({"success": False, "error": "Stop not found"}, status=404)
 
     return JsonResponse({"success": True})
+
+@csrf_exempt
+@require_POST
+def update_route_geometry(request):
+    """
+    Update Path or Path_Nguoc from an ordered list of {lat, lng} points.
+    """
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+        ma_tuyen = data["MaTuyen"]
+        chieu = int(data["Chieu"])  # 0: Path, 1: Path_Nguoc
+        path = data["path"]
+    except (KeyError, ValueError, json.JSONDecodeError) as e:
+        return JsonResponse({"success": False, "error": f"Invalid payload: {e}"}, status=400)
+
+    if not isinstance(path, list) or len(path) < 2:
+        return JsonResponse({"success": False, "error": "Path must have at least 2 points"}, status=400)
+
+    # Build LINESTRING WKT: "lng lat, lng lat, ..."
+    coord_strings = []
+    for pt in path:
+        try:
+            lat = float(pt["lat"])
+            lng = float(pt["lng"])
+        except (KeyError, ValueError, TypeError):
+            return JsonResponse({"success": False, "error": "Invalid coordinate in path"}, status=400)
+        coord_strings.append(f"{lng} {lat}")
+
+    wkt = "LINESTRING(" + ", ".join(coord_strings) + ")"
+    field = "Path" if chieu == 0 else "Path_Nguoc"
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"UPDATE tuyen_bus SET {field} = ST_GeomFromText(%s) WHERE MaTuyen = %s",
+            [wkt, ma_tuyen],
+        )
+        affected = cursor.rowcount
+
+    if affected == 0:
+        return JsonResponse({"success": False, "error": "Route not found"}, status=404)
+
+    return JsonResponse({"success": True})
