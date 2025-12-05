@@ -69,8 +69,13 @@
   <div id="map"></div>
   <div id="messageBox"></div>
 
-  <button id="applyRouteChangesBtn"
-          style="position:absolute;bottom:60px;left:50%;transform:translateX(-50%);
+  <button id="cancelRouteChangesBtn" style="position:absolute;bottom:60px;left:calc(50% + 140px);padding:8px 14px;
+                display:none;z-index:999;
+                background:#f44336;color:white;border:none;border-radius:4px;cursor:pointer;">
+    Cancel
+  </button>
+
+  <button id="applyRouteChangesBtn" style="position:absolute;bottom:60px;left:50%;transform:translateX(-50%);
                 padding:8px 14px;display:none;z-index:999;
                 background:#2196F3;color:white;border:none;border-radius:4px;cursor:pointer;">
     Apply changes
@@ -87,21 +92,23 @@
     let currentPolyline = null;
     let stopMarkers = [];
 
-    // stop editing state
+    // stop editing
     let selectedStop = null;
     let isChangingLocation = false;
 
-    // route editing state
+    // route editing
     let editMode = false;
-    let routeVertices = [];        // [{lat, lng}, ...] currently shown route
-    let vertexMarkers = [];        // draggable markers for vertices
     let selectedVertexIndex = null;
     let awaitingAddNodeClick = false;
     let currentRouteMaTuyen = null;
     let currentRouteChieu = "0";   // "0" đi, "1" về
+    let polylinePath = null;       // google.maps.MVCArray
+    let routeInfoWindow = null;
+    let vertexInfoWindow = null;
 
     let messageTimeoutId = null;
-    let routeInfoWindow = null;
+
+    let originalRouteBackup = null;
 
     function showMessage(text, timeout = 3000) {
       const box = document.getElementById("messageBox");
@@ -163,16 +170,11 @@
         const newLatLng = event.latLng;
 
         // 1) route Add node (highest priority)
-        if (editMode && awaitingAddNodeClick && selectedVertexIndex !== null) {
+        if (editMode && awaitingAddNodeClick && selectedVertexIndex !== null && polylinePath) {
           const insertIndex = selectedVertexIndex; // insert before selected
-          routeVertices.splice(insertIndex, 0, {
-            lat: newLatLng.lat(),
-            lng: newLatLng.lng(),
-          });
+          polylinePath.insertAt(insertIndex, newLatLng);
           awaitingAddNodeClick = false;
           selectedVertexIndex = null;
-          rebuildVertexMarkers();
-          refreshPolylineFromVertices();
           showMessage("Node added.", 2000);
           return;
         }
@@ -262,6 +264,7 @@
         map: map,
         strokeWeight: 2,
         strokeColor: "#0d47a1",
+        editable: false,
         icons: [
           // direction arrows
           {
@@ -298,22 +301,98 @@
         ],
       });
 
-      // click on route → show info + Edit button
-      if (!routeInfoWindow) {
-        routeInfoWindow = new google.maps.InfoWindow();
-      }
+      // get reference to the path
+      polylinePath = currentPolyline.getPath();
+
+      // single click handler, behavior depends on editMode
+      if (!routeInfoWindow) routeInfoWindow = new google.maps.InfoWindow();
+      if (!vertexInfoWindow) vertexInfoWindow = new google.maps.InfoWindow();
+
       currentPolyline.addListener("click", (e) => {
+        // if in edit mode, clicking on a vertex selects that vertex
+        if (editMode) {
+          if (typeof e.vertex === "number") {
+            selectedVertexIndex = e.vertex;
+            const idx = e.vertex;
+            const content = `
+              <div>
+                <b>Node #${idx}</b><br/>
+                <button id="addNodeBtn" type="button"
+                        style="background:#4CAF50;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;">
+                  Add node
+                </button>
+                <button id="delNodeBtn" type="button"
+                        style="background:#f44336;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;margin-left:6px;">
+                  Delete node
+                </button>
+                <button id="delNodeBeyondBtn" type="button"
+                        style="background:#f44336;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;margin-left:6px;">
+                  Delete node and beyond
+                </button>
+              </div>
+            `;
+            vertexInfoWindow.setContent(content);
+            vertexInfoWindow.setPosition(e.latLng);
+            vertexInfoWindow.open(map);
+
+            google.maps.event.addListenerOnce(vertexInfoWindow, "domready", () => {
+              const addBtn = document.getElementById("addNodeBtn");
+              const delBtn = document.getElementById("delNodeBtn");
+              const delBeyondBtn = document.getElementById("delNodeBeyondBtn");
+
+              if (addBtn) {
+                addBtn.onclick = () => {
+                  awaitingAddNodeClick = true;
+                  showMessage("Click on the map to insert a new node before this one.");
+                };
+              }
+              if (delBtn) {
+                delBtn.onclick = () => {
+                  if (polylinePath.getLength() <= 2) {
+                    showMessage("Cannot delete, route needs at least 2 points.", 4000);
+                    return;
+                  }
+                  polylinePath.removeAt(idx);
+                  selectedVertexIndex = null;
+                  vertexInfoWindow.close();
+                  showMessage("Node deleted.", 2000);
+                };
+              }
+              if (delBeyondBtn) {
+                delBeyondBtn.onclick = () => {
+                  if (idx === 0) {
+                    showMessage("Cannot delete from first node; route would be empty.", 4000);
+                    return;
+                  }
+                  if (polylinePath.getLength() - idx < 2) {
+                    showMessage("Need at least two nodes left on the route.", 4000);
+                    return;
+                  }
+                  for (let i = polylinePath.getLength() - 1; i >= idx; i--) {
+                    polylinePath.removeAt(i);
+                  }
+                  selectedVertexIndex = null;
+                  vertexInfoWindow.close();
+                  showMessage("Node and all following nodes deleted.", 2000);
+                };
+              }
+            });
+          }
+          return;
+        }
+
+        // NOT in edit mode → show route info + Edit button
         if (!currentRouteMaTuyen) return;
         const content = `
-        <div>
-          <b>Route ${currentRouteMaTuyen}</b><br/>
-          Direction: ${currentRouteChieu === "0" ? "Chiều đi" : "Chiều về"}<br/>
-          <button id="editRouteBtn" type="button"
-                  style="background:#2196F3;color:white;border:none;padding:5px 10px;border-radius:4px;margin-top:6px;cursor:pointer;">
-            Edit route
-          </button>
-        </div>
-      `;
+          <div>
+            <b>Route ${currentRouteMaTuyen}</b><br/>
+            Direction: ${currentRouteChieu === "0" ? "Chiều đi" : "Chiều về"}<br/>
+            <button id="editRouteBtn" type="button"
+                    style="background:#2196F3;color:white;border:none;padding:5px 10px;border-radius:4px;margin-top:6px;cursor:pointer;">
+              Edit route
+            </button>
+          </div>
+        `;
         routeInfoWindow.setContent(content);
         routeInfoWindow.setPosition(e.latLng);
         routeInfoWindow.open(map);
@@ -345,146 +424,71 @@
 
     // ROUTE EDIT MODE
     function enterRouteEditMode() {
-      if (!currentPolyline || !routeVertices.length || !currentRouteMaTuyen) {
+      if (!currentPolyline || !polylinePath || !currentRouteMaTuyen) {
         showMessage("No route to edit.");
         return;
       }
       if (editMode) return;
+
       editMode = true;
       awaitingAddNodeClick = false;
       selectedVertexIndex = null;
-      showMessage("Route edit mode: drag red dots, click a dot to Add/Delete node.");
 
-      document.getElementById("applyRouteChangesBtn").style.display = "block";
-      document.getElementById("applyRouteChangesBtn").textContent =
-        `Apply changes to route ${currentRouteMaTuyen}`;
+      // backup original geometry
+      originalRouteBackup = [];
+      for (let i = 0; i < polylinePath.getLength(); i++) {
+        const p = polylinePath.getAt(i);
+        originalRouteBackup.push({ lat: p.lat(), lng: p.lng() });
+      }
 
-      rebuildVertexMarkers();
+      currentPolyline.setEditable(true);
+
+      showMessage("Route edit mode: drag vertices, click a vertex to Add/Delete.");
+
+      const applyBtn = document.getElementById("applyRouteChangesBtn");
+      applyBtn.style.display = "block";
+      applyBtn.textContent = `Apply changes to route ${currentRouteMaTuyen}`;
+
+      const cancelBtn = document.getElementById("cancelRouteChangesBtn");
+      cancelBtn.style.display = "block";
     }
+
 
     function exitRouteEditMode() {
       editMode = false;
       awaitingAddNodeClick = false;
       selectedVertexIndex = null;
 
-      vertexMarkers.forEach(m => m.setMap(null));
-      vertexMarkers = [];
+      if (currentPolyline) {
+        currentPolyline.setEditable(false);
+      }
 
-      const btn = document.getElementById("applyRouteChangesBtn");
-      if (btn) btn.style.display = "none";
-    }
+      const applyBtn = document.getElementById("applyRouteChangesBtn");
+      if (applyBtn) applyBtn.style.display = "none";
 
-    function rebuildVertexMarkers() {
-      // remove old markers
-      vertexMarkers.forEach(m => m.setMap(null));
-      vertexMarkers = [];
+      const cancelBtn = document.getElementById("cancelRouteChangesBtn");
+      if (cancelBtn) cancelBtn.style.display = "none";
 
-      routeVertices.forEach((pt, idx) => {
-        const marker = new google.maps.Marker({
-          position: pt,
-          map: map,
-          draggable: true,
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 3.5,
-            fillColor: "#ff0000",
-            fillOpacity: 1,
-            strokeColor: "#ffffff",
-            strokeWeight: 1,
-          },
-          zIndex: 1000,
-        });
+      if (vertexInfoWindow) vertexInfoWindow.close();
 
-        marker.addListener("dragend", (e) => {
-          const pos = e.latLng;
-          routeVertices[idx] = { lat: pos.lat(), lng: pos.lng() };
-          refreshPolylineFromVertices();
-        });
-
-        marker.addListener("click", () => {
-          selectedVertexIndex = idx;
-          const info = new google.maps.InfoWindow({
-            content: `
-              <div>
-                <b>Node #${idx}</b><br/>
-                <button id="addNodeBtn" type="button" 
-                        style="background:#4CAF50;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;">
-                  Add node
-                </button>
-                <button id="delNodeBtn" type="button" 
-                        style="background:#f44336;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;margin-left:6px;">
-                  Delete node
-                </button>
-                <button id="delNodeBeyondBtn" type="button"
-                        style="background:#f44336;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;margin-left:6px;">
-                  Delete node and beyond
-                </button>
-              </div>
-            `,
-          });
-          info.open(map, marker);
-
-          google.maps.event.addListenerOnce(info, "domready", () => {
-            const addBtn = document.getElementById("addNodeBtn");
-            const delBtn = document.getElementById("delNodeBtn");
-            const delBeyondBtn = document.getElementById("delNodeBeyondBtn");
-
-            if (addBtn) {
-              addBtn.onclick = () => {
-                awaitingAddNodeClick = true;
-                showMessage("Click on the map to insert a new node before this one.");
-              };
-            }
-
-            if (delBtn) {
-              delBtn.onclick = () => {
-                if (routeVertices.length <= 2) {
-                  showMessage("Cannot delete, route needs at least 2 points.", 4000);
-                  return;
-                }
-                routeVertices.splice(idx, 1);
-                selectedVertexIndex = null;
-                info.close();
-                rebuildVertexMarkers();
-                refreshPolylineFromVertices();
-                showMessage("Node deleted.", 2000);
-              };
-            }
-
-            if (delBeyondBtn) {
-              delBeyondBtn.onclick = () => {
-                if (idx === 0) {
-                  showMessage("Cannot delete from first node; route would be empty.", 4000);
-                  return;
-                }
-                if (routeVertices.length - idx < 2) {
-                  showMessage("Need at least two nodes left on the route.", 4000);
-                  return;
-                }
-                // keep nodes [0 .. idx-1], drop idx and everything after
-                routeVertices = routeVertices.slice(0, idx);
-                selectedVertexIndex = null;
-                info.close();
-                rebuildVertexMarkers();
-                refreshPolylineFromVertices();
-                showMessage("Node and all following nodes deleted.", 2000);
-              };
-            }
-          });
-        });
-
-        vertexMarkers.push(marker);
-      });
+      // clear backup
+      originalRouteBackup = null;
     }
 
     // APPLY CHANGES TO DB
 
     async function applyRouteChanges() {
-      if (!editMode || !currentRouteMaTuyen || routeVertices.length < 2) {
+      if (!editMode || !currentRouteMaTuyen || !polylinePath || polylinePath.getLength() < 2) {
         showMessage("Nothing to apply.", 3000);
         return;
       }
       showMessage("Saving route geometry...");
+
+      const vertices = [];
+      for (let i = 0; i < polylinePath.getLength(); i++) {
+        const p = polylinePath.getAt(i);
+        vertices.push({ lat: p.lat(), lng: p.lng() });
+      }
 
       try {
         const res = await fetch("/update-route-geometry/", {
@@ -493,7 +497,7 @@
           body: JSON.stringify({
             MaTuyen: currentRouteMaTuyen,
             Chieu: currentRouteChieu,
-            path: routeVertices,
+            path: vertices,
           }),
         });
         const data = await res.json();
@@ -509,11 +513,30 @@
       }
     }
 
+
     function isRouteVisible(bounds) {
       const mapBounds = map.getBounds();
       if (!mapBounds) return false;
       return mapBounds.intersects(bounds);
     }
+
+    function cancelRouteChanges() {
+      if (!editMode || !originalRouteBackup || !polylinePath) {
+        exitRouteEditMode();
+        return;
+      }
+
+      // restore original points
+      polylinePath.clear();
+      originalRouteBackup.forEach(pt => {
+        polylinePath.push(new google.maps.LatLng(pt.lat, pt.lng));
+      });
+
+      showMessage("Changes cancelled.", 2500);
+
+      exitRouteEditMode();
+    }
+
 
 
     window.onload = function () {
@@ -523,6 +546,8 @@
       document.getElementById("directionSelect").addEventListener("change", loadAndDrawRoute);
 
       document.getElementById("applyRouteChangesBtn").addEventListener("click", applyRouteChanges);
+      document.getElementById("cancelRouteChangesBtn").addEventListener("click", cancelRouteChanges);
+
     };
   </script>
 
