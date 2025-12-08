@@ -1,0 +1,14 @@
+{
+  "status": "success",
+  "data": [
+    {
+      "id": "152",
+      "MaTuyenXe": "02",
+      "TenHanhTrinh": "A",
+      "GhiChu": null,
+      "NgayCapNhat": "2024-09-20 04:53:05.000",
+      "NguoiCapNhat": "1",
+      "MaHanhTrinh": "109"
+    }
+  ]
+}

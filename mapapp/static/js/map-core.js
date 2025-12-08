@@ -33,6 +33,9 @@ let previousMapDraggable = true;
 
 let pendingRightClickStop = null;
 
+let geocoder;  // for reverse geocoding
+
+
 //
 // TYPE 2 (Điểm dừng)  — triangles
 //
@@ -66,13 +69,31 @@ const iconHexagonRed = {
   scale: 1.2,
 };
 
-const iconHexagonGreen = {
+const iconHexagonBlue = {
   path: "M -5,0 L -2.5,-4.3 L 2.5,-4.3 L 5,0 L 2.5,4.3 L -2.5,4.3 z",
-  fillColor: "#4CAF50",
+  fillColor: "#2196F3",  // BLUE
   fillOpacity: 1,
   strokeColor: "#ffffff",
   strokeWeight: 1,
-  scale: 1.2,
+  scale: 1.25,
+};
+
+const iconHexagonGreen = {
+  path: "M -5,0 L -2.5,-4.3 L 2.5,-4.3 L 5,0 L 2.5,4.3 L -2.5,4.3 z",
+  fillColor: "#4CAF50",  // GREEN
+  fillOpacity: 1,
+  strokeColor: "#ffffff",
+  strokeWeight: 1,
+  scale: 1.25,
+};
+
+const iconHexagonOrange = {
+  path: "M -5,0 L -2.5,-4.3 L 2.5,-4.3 L 5,0 L 2.5,4.3 L -2.5,4.3 z",
+  fillColor: "#ff9800",  // ORANGE
+  fillOpacity: 1,
+  strokeColor: "#ffffff",
+  strokeWeight: 1,
+  scale: 1.25,
 };
 
 // Toast helper
@@ -94,6 +115,8 @@ function initMap() {
     zoom: 12,
     center: center,
   });
+
+  geocoder = new google.maps.Geocoder();
 
   // Overlay for rectangle selection
   mapOverlay = new google.maps.OverlayView();

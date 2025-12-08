@@ -103,6 +103,7 @@
     const ROUTES = JSON.parse('{{ routes_json|escapejs }}');
     const ROUTE_INFO = {};
     ROUTES.forEach(r => ROUTE_INFO[r.MaTuyen] = r);
+    const XA_LIST = JSON.parse('{{ xa_json|escapejs }}');
   </script>
 
   <script src="{% static 'js/map-core.js' %}"></script>
