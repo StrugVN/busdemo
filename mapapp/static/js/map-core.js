@@ -112,9 +112,9 @@ function showMessage(text, timeout = 3000) {
 
 // initMap – full logic: overlay, markers, click handlers
 function initMap() {
-  const center = { lat: 10.776, lng: 106.700 }; // adjust to your city
+  const center = { lat: 9.602097, lng: 105.973469 }; // adjust to your city
   map = new google.maps.Map(document.getElementById("map"), {
-    zoom: 12,
+    zoom: 15,
     center: center,
   });
 

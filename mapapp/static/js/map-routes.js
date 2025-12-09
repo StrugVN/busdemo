@@ -1,3 +1,80 @@
+// ----- GLOBALS -----
+let allRoutesPolylines = [];
+
+function enforceMinZoom(minZoom = 12) {
+  const listener = google.maps.event.addListener(map, "idle", function () {
+    if (map.getZoom() < minZoom) {
+      map.setZoom(minZoom);
+    }
+    google.maps.event.removeListener(listener);
+  });
+}
+
+
+// Generate unlimited, visually distinct colors
+function generateColorForIndex(i, total) {
+    const hue = (i * (360 / total)) % 360;
+    return `hsl(${hue}, 85%, 45%)`;
+}
+
+// Remove all simple polylines
+function clearAllRoutesPolylines() {
+    allRoutesPolylines.forEach(pl => pl.setMap(null));
+    allRoutesPolylines = [];
+}
+
+async function loadAllRoutesForCurrentDirection() {
+    clearAllRoutesPolylines();
+
+    const chieu = document.getElementById("directionSelect").value;
+    if (!ROUTES || ROUTES.length === 0) return;
+
+    const bounds = new google.maps.LatLngBounds();
+
+    for (let i = 0; i < ROUTES.length; i++) {
+        const r = ROUTES[i];
+
+        try {
+            const res = await fetch(
+                `/route-path/?MaTuyen=${encodeURIComponent(r.MaTuyen)}&Chieu=${encodeURIComponent(chieu)}`
+            );
+
+            if (!res.ok) {
+                console.error("Failed to load route", r.MaTuyen);
+                continue;
+            }
+
+            const data = await res.json();
+            const path = data.path || [];
+            if (!path.length) continue;
+
+            const color = generateColorForIndex(i, ROUTES.length);
+
+            const poly = new google.maps.Polyline({
+                path,
+                map,
+                strokeColor: color,
+                strokeWeight: 2,
+                clickable: false,     // simple display only
+                editable: false
+            });
+
+            allRoutesPolylines.push(poly);
+            path.forEach(pt => bounds.extend(pt));
+
+        } catch (err) {
+            console.error("Route load error", r.MaTuyen, err);
+        }
+    }
+
+    if (!bounds.isEmpty()) {
+    map.fitBounds(bounds);
+    enforceMinZoom(10);
+}
+
+}
+
+
 async function loadAndDrawRoute() {
     const maTuyen = document.getElementById("routeSelect").value;
     const chieu = document.getElementById("directionSelect").value;
@@ -11,14 +88,18 @@ async function loadAndDrawRoute() {
     }
 
     if (!maTuyen) {
+        // Hide the main editing polyline
         if (currentPolyline) {
             currentPolyline.setMap(null);
             currentPolyline = null;
         }
-        await updateStopIconsForCurrentRoute();
+
+        await loadAllRoutesForCurrentDirection();
+        await updateStopIconsForCurrentRoute();   // handled as "none selected"
         return;
     }
 
+    clearAllRoutesPolylines();
     const res = await fetch(`/route-path/?MaTuyen=${encodeURIComponent(maTuyen)}&Chieu=${encodeURIComponent(chieu)}`);
     if (!res.ok) {
         console.error("Failed to load route", await res.text());
