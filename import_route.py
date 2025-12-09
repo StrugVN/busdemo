@@ -3,8 +3,6 @@ import json
 import math
 import argparse
 import mysql.connector
-from shapely.geometry import LineString, MultiLineString
-from shapely.ops import linemerge, unary_union
 
 # ============== CONFIG: change to your DB credentials ==================
 DB_CONFIG = {
@@ -50,11 +48,10 @@ def load_info(route_code, base_dir="."):
 
 def load_full_merged_points(route_code, base_dir="."):
     """
-    Read {MaTuyen}_path.json and reconstruct ONE merged path by connectivity
-    using Shapely, but DO NOT trim it yet.
+    Read {MaTuyen}_path.json and concatenate all path segments in order.
 
     Returns:
-        flat_points: list of (x, y) in Mercator coordinates, ordered along the merged line.
+        flat_points: list of (x, y) in Mercator coordinates, ordered along the path.
     """
     path_file = os.path.join(base_dir, f"{route_code}_path.json")
     with open(path_file, "r", encoding="utf-8") as f:
@@ -69,41 +66,26 @@ def load_full_merged_points(route_code, base_dir="."):
     if not paths:
         raise ValueError("Empty 'paths' list")
 
-    segments = []
-    for path_coords in paths:
+    print(f"Found {len(paths)} path segments")
+    
+    # Concatenate all paths in order
+    flat_points = []
+    for idx, path_coords in enumerate(paths):
+        print(f"  Segment {idx}: {len(path_coords)} points")
         if len(path_coords) < 2:
             continue
-        segments.append(LineString(path_coords))
-
-    if not segments:
-        raise ValueError("No valid segments in paths")
-
-    # Merge all segments by connectivity
-    merged = linemerge(unary_union(MultiLineString(segments)))
-
-    def iter_coords(geom):
-        if isinstance(geom, LineString):
-            for x, y in geom.coords:
-                yield (x, y)
-        elif isinstance(geom, MultiLineString):
-            for g in geom.geoms:
-                for x, y in g.coords:
-                    yield (x, y)
-        else:
-            raise ValueError(f"Unexpected merged geometry type: {type(geom)}")
-
-    flat_points = []
-    last_pt = None
-    for x, y in iter_coords(merged):
-        pt = (x, y)
-        # skip only immediate duplicates, keep loops
-        if last_pt is not None and pt == last_pt:
-            continue
-        flat_points.append(pt)
-        last_pt = pt
+        
+        for x, y in path_coords:
+            pt = (x, y)
+            # Skip immediate duplicates
+            if flat_points and flat_points[-1] == pt:
+                continue
+            flat_points.append(pt)
+    
+    print(f"Total points after concatenation: {len(flat_points)}")
 
     if len(flat_points) < 2:
-        raise ValueError("Not enough points after merge")
+        raise ValueError("Not enough points after concatenation")
 
     return flat_points
 
@@ -131,34 +113,39 @@ def trim_path_to_two_stations(flat_points, station_xy):
             if d2 < best_d2:
                 best_d2 = d2
                 best_i = i
-        return best_i
+        return best_i, best_d2
 
     (sx1, sy1), (sx2, sy2) = station_xy
 
-    i1 = nearest_index((sx1, sy1), flat_points)
-    i2 = nearest_index((sx2, sy2), flat_points)
+    i1, d1 = nearest_index((sx1, sy1), flat_points)
+    i2, d2 = nearest_index((sx2, sy2), flat_points)
+
+    print(f"Station 1 ({sx1:.2f}, {sy1:.2f}) -> index {i1}, distance {d1**0.5:.2f}m")
+    print(f"Station 2 ({sx2:.2f}, {sy2:.2f}) -> index {i2}, distance {d2**0.5:.2f}m")
+    print(f"Total points in path: {len(flat_points)}")
 
     # If we somehow failed, just return original
     if i1 is None or i2 is None:
+        print("Warning: Could not find nearest points, returning full path")
         return flat_points
 
-    # If order is reversed (station1 lies after station2 on this line),
-    # reverse the whole line and recompute indices.
-    if i1 > i2:
-        flat_points = list(reversed(flat_points))
-        i1 = nearest_index((sx1, sy1), flat_points)
-        i2 = nearest_index((sx2, sy2), flat_points)
-
-    # Sanity: ensure i1 <= i2
-    if i1 is None or i2 is None:
+    # Check if distances are reasonable (within 1km)
+    if d1**0.5 > 1000 or d2**0.5 > 1000:
+        print(f"Warning: Station(s) very far from path (d1={d1**0.5:.0f}m, d2={d2**0.5:.0f}m)")
+        print("Returning full path without trimming")
         return flat_points
+
+    # Ensure i1 <= i2
     if i1 > i2:
         i1, i2 = i2, i1
+        print(f"Swapped indices: now i1={i1}, i2={i2}")
 
     # Slice inclusive between the two stations
     sub = flat_points[i1 : i2 + 1]
+    print(f"Trimmed path: {len(sub)} points (from index {i1} to {i2})")
+    
     if len(sub) < 2:
-        # fallback if something weird happens
+        print("Warning: Trimmed path too short, returning full path")
         return flat_points
 
     return sub
