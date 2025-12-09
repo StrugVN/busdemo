@@ -35,6 +35,8 @@ let pendingRightClickStop = null;
 
 let geocoder;  // for reverse geocoding
 
+let currentRouteStopIds = new Set();  // MaTram currently on selected route+direction
+
 
 //
 // TYPE 2 (Điểm dừng)  — triangles

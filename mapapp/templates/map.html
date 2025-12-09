@@ -75,6 +75,21 @@
               padding:8px;font-size:13px;z-index:999;display:none;box-shadow:0 2px 6px rgba(0,0,0,0.2);">
   </div>
 
+  <div id="dialogPanel" style="
+      position:absolute;
+      top:120px;
+      left:50%;
+      transform:translateX(-50%);
+      width:260px;
+      background:#fff;
+      border:1px solid #ccc;
+      border-radius:4px;
+      padding:10px;
+      font-size:13px;
+      z-index:999;
+      display:none;
+      box-shadow:0 2px 6px rgba(0,0,0,0.2);
+  "></div>
 
   <button id="cancelRouteChangesBtn" style="position:absolute;bottom:60px;left:calc(50% + 140px);padding:8px 14px;
                 display:none;z-index:999;
@@ -104,6 +119,9 @@
     const ROUTE_INFO = {};
     ROUTES.forEach(r => ROUTE_INFO[r.MaTuyen] = r);
     const XA_LIST = JSON.parse('{{ xa_json|escapejs }}');
+
+    const DELETE_ROUTE_STOP_URL = "{% url 'delete_route_stop' %}";
+    const UPDATE_STOP_INFO_URL = "{% url 'update_stop_info' %}";
   </script>
 
   <script src="{% static 'js/map-core.js' %}"></script>

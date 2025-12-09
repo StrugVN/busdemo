@@ -1,3 +1,14 @@
+function openDialog(htmlContent) {
+    const dlg = document.getElementById("dialogPanel");
+    dlg.innerHTML = htmlContent;
+    dlg.style.display = "block";
+}
+
+function closeDialog() {
+    const dlg = document.getElementById("dialogPanel");
+    dlg.style.display = "none";
+}
+
 function buildShortNameFromAddress(address) {
     if (!address) return "";
 
@@ -256,11 +267,14 @@ async function saveStopFromPanel() {
                 lat: s.lat,
                 lng: s.lng,
                 MaLoai: s.MaLoai,
-                DiaChi: s.DiaChi,
+                DiaChi: s.DiaChi || null,
+                MaXa: s.MaXa || null,
+                TenXa: s.TenXa || null,
             };
             STOPS.push(stopObj);
             createStopMarker(stopObj);
         }
+
 
         showMessage("Stop added to route.", 3000);
         panel.style.display = "none";
@@ -276,8 +290,7 @@ async function saveStopFromPanel() {
 
 
 function createStopMarker(stop) {
-    // default icon based on stop type (off-route)
-    let baseIcon = stop.MaLoai == 1 ? iconHexagonRed : iconTriangleRed;
+    let baseIcon = stop.MaLoai == 1 ? iconHexagonOrange : iconTriangleRed;
 
     const marker = new google.maps.Marker({
         position: { lat: stop.lat, lng: stop.lng },
@@ -288,133 +301,149 @@ function createStopMarker(stop) {
 
     marker.stopData = stop;
 
-    const stopType = String(stop.MaLoai) === "1" ? "Bến xe" : "Điểm dừng";
-
-    const btnId = `change-location-${stop.MaTram}`;
-    const info = new google.maps.InfoWindow({
-        content: `
-        <div style="min-width:220px">
-            <b>${stop.TenTram || stop.MaTram}</b><br/>
-            Code: ${stop.MaTram}<br/>
-            Type: ${stop.MaLoai == 1 ? "Station" : "Stop"}<br/>
-            Address: ${stop.DiaChi || "N/A"}<br/>
-            Ward: ${stop.TenXa || "N/A"}<br/><br/>
-
-            <button id="editStopBtn_${stop.MaTram}" style="margin-bottom:4px;width:100%;">Edit info</button>
-            <button id="deleteStopBtn_${stop.MaTram}" style="background:#f44336;color:white;margin-bottom:4px;width:100%;">Remove from route</button>
-            <button id="moveStopBtn_${stop.MaTram}" style="background:#2196F3;color:white;width:100%;">Change location</button>
-        </div>
-        `
-
-    });
+    const info = new google.maps.InfoWindow();
 
     marker.addListener("click", () => {
+        const onRoute = currentRouteStopIds && currentRouteStopIds.has(stop.MaTram);
+
+        const removeButtonHtml = onRoute
+            ? `
+        <button id="deleteStopBtn_${stop.MaTram}"
+                style="flex:1; padding:4px 6px; border-radius:4px;
+                       border:1px solid #f44336; background:#f44336; color:white; cursor:pointer;">
+          Remove
+        </button>`
+            : "";
+
+        const content = `
+      <div style="min-width:230px">
+        <b>${stop.TenTram || stop.MaTram}</b><br/>
+        Code: ${stop.MaTram}<br/>
+        Type: ${stop.MaLoai == 1 ? "Station" : "Stop"}<br/>
+        Address: ${stop.DiaChi || "N/A"}<br/>
+        Ward: ${stop.TenXa || "N/A"}<br/>
+
+        <div style="display:flex; gap:4px; margin-top:8px;">
+          <button id="editStopBtn_${stop.MaTram}"
+                  style="flex:1; padding:4px 6px; border-radius:4px;
+                         border:1px solid #ddd; background:#fafafa; cursor:pointer;">
+            Edit
+          </button>
+
+          ${removeButtonHtml}
+
+          <button id="moveStopBtn_${stop.MaTram}"
+                  style="flex:1; padding:4px 6px; border-radius:4px;
+                         border:1px solid #2196F3; background:#2196F3; color:white; cursor:pointer;">
+            Move
+          </button>
+        </div>
+      </div>
+    `;
+
+        info.setContent(content);
         info.open(map, marker);
+
         google.maps.event.addListenerOnce(info, "domready", () => {
-            document.getElementById(`moveStopBtn_${stop.MaTram}`).onclick = () => {
-                selectedStop = marker;
-                isChangingLocation = true;
-                showMessage("Click on map to choose new location.");
-            };
+            const editBtn = document.getElementById(`editStopBtn_${stop.MaTram}`);
+            const deleteBtn = document.getElementById(`deleteStopBtn_${stop.MaTram}`);
+            const moveBtn = document.getElementById(`moveStopBtn_${stop.MaTram}`);
 
-            document.getElementById(`editStopBtn_${stop.MaTram}`).onclick = () => {
-                openEditStopDialog(stop);
-            };
+            if (moveBtn) {
+                moveBtn.onclick = () => {
+                    selectedStop = marker;
+                    isChangingLocation = true;
+                    showMessage("Click on map to choose new location.");
+                };
+            }
 
-            document.getElementById(`deleteStopBtn_${stop.MaTram}`).onclick = () => {
-                openDeleteStopConfirm(stop);
-            };
+            if (editBtn) {
+                editBtn.onclick = () => {
+                    openEditStopDialog(marker.stopData, info); // pass info window too
+                };
+            }
+
+            if (deleteBtn) {
+                deleteBtn.onclick = () => {
+                    openDeleteStopConfirm(marker.stopData, info);
+                };
+            }
         });
-
     });
 
+    // Right-click on a stop to add it into the current route at some position
     marker.addListener("rightclick", () => {
         if (!currentRouteMaTuyen) {
-            showMessage("Select a route + direction first.", 3000);
+            showMessage("Select a route and direction first.");
             return;
         }
 
-        // load stop into pending
+        // Use this stop's position as the click location
         pendingStopLatLng = marker.getPosition();
-        pendingRightClickStop = stop;
+        // Remember which stop was right-clicked so the panel can preselect it
+        pendingRightClickStop = marker.stopData;
 
+        // Open the "Add stop" panel in "fromStop=true" mode
         openAddStopPanel(true);
     });
+
 
     stopMarkers.push(marker);
 }
 
+
 async function updateStopIconsForCurrentRoute() {
-    // No route selected → everything off-route
     if (!currentRouteMaTuyen) {
+        currentRouteStopIds = new Set();
+        // no route selected -> all stops off-route
         stopMarkers.forEach(marker => {
             if (marker.stopData.MaLoai == 1) {
-                marker.setIcon(iconHexagonOrange);  // OFF-ROUTE STATION = ORANGE
+                marker.setIcon(iconHexagonOrange);
             } else {
-                marker.setIcon(iconTriangleRed);    // OFF-ROUTE STOP = RED
+                marker.setIcon(iconTriangleRed);
             }
         });
         return;
     }
 
-    // Load stops for this route/direction
-    let stops = [];
     try {
         const res = await fetch(
             `/route-stops/?MaTuyen=${encodeURIComponent(currentRouteMaTuyen)}&Chieu=${encodeURIComponent(currentRouteChieu)}`
         );
-        if (res.ok) {
-            const data = await res.json();
-            stops = data.stops || [];
-        }
-    } catch (err) {
-        console.error("Error updating stop icons:", err);
-        return;
-    }
-
-    const onRoute = new Set(stops.map(s => s.MaTram));
-
-    // Identify FIRST and LAST STATION in the list
-    let firstStation = null;
-    let lastStation = null;
-
-    if (stops.length > 0) {
-        firstStation = stops[0].MaTram;
-        lastStation = stops[stops.length - 1].MaTram;
-    }
-
-    stopMarkers.forEach(marker => {
-        const s = marker.stopData;
-        const maTram = s.MaTram;
-
-        if (!onRoute.has(maTram)) {
-            // OFF-ROUTE
-            if (s.MaLoai == 1) {
-                marker.setIcon(iconHexagonOrange);  // station off-route
-            } else {
-                marker.setIcon(iconTriangleRed);
-            }
+        if (!res.ok) {
+            console.error("Failed to load route stops", await res.text());
             return;
         }
+        const data = await res.json();
+        const stops = data.stops || [];
 
-        // ON-ROUTE
-        if (s.MaLoai == 1) {
-            // Station type
-            if (maTram === firstStation) {
-                marker.setIcon(iconHexagonBlue);   // START
-            } else if (maTram === lastStation) {
-                marker.setIcon(iconHexagonGreen);  // END
+        const onRouteSet = new Set(stops.map(s => s.MaTram));
+        currentRouteStopIds = onRouteSet;  // <-- add this
+
+        stopMarkers.forEach(marker => {
+            const maTram = marker.stopData?.MaTram;
+            const onRoute = maTram && onRouteSet.has(maTram);
+
+            if (onRoute) {
+                if (marker.stopData.MaLoai == 1) {
+                    marker.setIcon(iconHexagonGreen);
+                } else {
+                    marker.setIcon(iconTriangleGreen);
+                }
             } else {
-                marker.setIcon(iconHexagonGreen);  // Middle stations? Keep green or define another color
+                if (marker.stopData.MaLoai == 1) {
+                    marker.setIcon(iconHexagonOrange);
+                } else {
+                    marker.setIcon(iconTriangleRed);
+                }
             }
-        } else {
-            // normal stops
-            marker.setIcon(iconTriangleGreen);
-        }
-    });
+        });
+    } catch (err) {
+        console.error("Error updating stop icons:", err);
+    }
 }
 
-function openEditStopDialog(stop) {
+function openEditStopDialog(stop, infoWindow) {
     const panel = document.getElementById("addStopPanel");
 
     const xaOptions = XA_LIST
@@ -422,92 +451,140 @@ function openEditStopDialog(stop) {
         .join("");
 
     panel.innerHTML = `
-      <div>
-        <h3>Edit Stop</h3>
-        <label>Name:</label>
-        <input id="editName" value="${stop.TenTram || ""}" style="width:100%;margin-bottom:6px;" />
+    <div>
+      <h3>Edit Stop</h3>
 
-        <label>Address:</label>
-        <input id="editAddress" value="${stop.DiaChi || ""}" style="width:100%;margin-bottom:6px;" />
+      <label>Name:</label>
+      <input id="editName" value="${stop.TenTram || ""}" 
+             style="width:100%;margin-bottom:6px;" />
 
-        <label>Type:</label>
-        <select id="editType" style="width:100%;margin-bottom:6px;">
-          <option value="1" ${stop.MaLoai == 1 ? "selected" : ""}>Station</option>
-          <option value="2" ${stop.MaLoai == 2 ? "selected" : ""}>Stop</option>
-        </select>
+      <label>Address:</label>
+      <input id="editAddress" value="${stop.DiaChi || ""}" 
+             style="width:100%;margin-bottom:6px;" />
 
-        <label>Ward:</label>
-        <select id="editMaXa" style="width:100%;margin-bottom:6px;">
-          ${xaOptions}
-        </select>
+      <label>Type:</label>
+      <select id="editType" style="width:100%;margin-bottom:6px;">
+        <option value="1" ${String(stop.MaLoai) === "1" ? "selected" : ""}>Station</option>
+        <option value="2" ${String(stop.MaLoai) === "2" ? "selected" : ""}>Stop</option>
+      </select>
 
-        <button id="saveEditStopBtn" style="background:#2196F3;color:white;width:100%;margin-top:6px;">Save</button>
-        <button id="cancelEditStopBtn" style="width:100%;margin-top:6px;">Cancel</button>
-      </div>
-    `;
+      <label>Ward:</label>
+      <select id="editMaXa" style="width:100%;margin-bottom:6px;">
+        ${xaOptions}
+      </select>
+
+      <button id="saveEditStopBtn"
+              style="background:#2196F3;color:white;width:100%;margin-top:6px;
+                     border:none;padding:6px;border-radius:4px;">
+        Save
+      </button>
+      <button id="cancelEditStopBtn"
+              style="width:100%;margin-top:6px;
+                     border:1px solid #ccc;padding:6px;border-radius:4px;">
+        Cancel
+      </button>
+    </div>
+  `;
     panel.style.display = "block";
 
     document.getElementById("cancelEditStopBtn").onclick = () => {
         panel.style.display = "none";
+        if (infoWindow) infoWindow.close();
     };
 
     document.getElementById("saveEditStopBtn").onclick = async () => {
         const body = {
             MaTram: stop.MaTram,
-            TenTram: document.getElementById("editName").value,
-            DiaChi: document.getElementById("editAddress").value,
+            TenTram: document.getElementById("editName").value.trim(),
+            DiaChi: document.getElementById("editAddress").value.trim(),
             MaLoai: document.getElementById("editType").value,
             MaXa: document.getElementById("editMaXa").value,
         };
 
-        const res = await fetch("/update-stop-info/", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-        });
+        try {
+            const res = await fetch(UPDATE_STOP_INFO_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            const data = await res.json();
+            if (!data.success) {
+                showMessage("Error updating stop");
+                return;
+            }
 
-        const data = await res.json();
-        if (!data.success) {
+            // Update local object so future dialogs show new info
+            stop.TenTram = body.TenTram;
+            stop.DiaChi = body.DiaChi;
+            stop.MaLoai = body.MaLoai;
+            stop.MaXa = body.MaXa;
+
+            showMessage("Stop updated");
+            panel.style.display = "none";
+            if (infoWindow) infoWindow.close();
+
+            // Icons might change if type changed
+            updateStopIconsForCurrentRoute();
+        } catch (e) {
+            console.error(e);
             showMessage("Error updating stop");
-            return;
         }
-
-        showMessage("Stop updated");
-        panel.style.display = "none";
-
-        // update local STOPS array
-        Object.assign(stop, body);
-
-        // update marker icon if needed
-        updateStopIconsForCurrentRoute();
     };
 }
 
-function openDeleteStopConfirm(stop) {
+
+function openDeleteStopConfirm(stop, infoWindow) {
     if (!currentRouteMaTuyen) {
         showMessage("Select a route first.");
         return;
     }
 
-    if (!confirm(`Remove ${stop.TenTram} from route ${currentRouteMaTuyen}?`))
-        return;
+    openDialog(`
+        <div style="text-align:center;">
+            <b>Remove Stop</b><br><br>
+            Remove <b>${stop.TenTram || stop.MaTram}</b> from route <b>${currentRouteMaTuyen}</b>?<br><br>
+            <button id="dlgDeleteYes" 
+                style="background:#f44336;color:white;border:none;padding:6px 10px;
+                       border-radius:4px;width:100%;margin-bottom:6px;">
+                Remove
+            </button>
+            <button id="dlgDeleteNo" 
+                style="background:#ccc;color:black;border:none;padding:6px 10px;
+                       border-radius:4px;width:100%;">
+                Cancel
+            </button>
+        </div>
+    `);
 
-    fetch("/delete-route-stop/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            MaTram: stop.MaTram,
-            MaTuyen: currentRouteMaTuyen,
-            Chieu: currentRouteChieu,
-        })
-    })
-        .then(res => res.json())
-        .then(data => {
-            if (!data.success) {
-                showMessage("Failed to remove stop.");
-                return;
-            }
-            showMessage("Stop removed.");
-            updateStopIconsForCurrentRoute();
+    document.getElementById("dlgDeleteNo").onclick = closeDialog;
+
+    document.getElementById("dlgDeleteYes").onclick = async () => {
+        const res = await fetch(DELETE_ROUTE_STOP_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                MaTram: stop.MaTram,
+                MaTuyen: currentRouteMaTuyen,
+                Chieu: currentRouteChieu,
+            }),
         });
+
+        const data = await res.json();
+        if (!data.success) {
+            showMessage("Failed to remove stop.");
+            closeDialog();
+            return;
+        }
+
+        showMessage("Stop removed from route.");
+        closeDialog();
+
+        // 🔹 Close the stop info bubble as well
+        if (infoWindow) {
+            infoWindow.close();
+        }
+
+        updateStopIconsForCurrentRoute();
+    };
 }
+

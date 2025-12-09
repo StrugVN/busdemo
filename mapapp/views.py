@@ -37,8 +37,16 @@ def map_view(request):
     # 1) Load ALL stops (for markers)
     with connection.cursor() as cursor:
         cursor.execute("""
-            SELECT MaTram, TenTram, ViDo, KinhDo, MaLoai
-            FROM tram_dung
+            SELECT d.MaTram,
+                d.TenTram,
+                d.ViDo,
+                d.KinhDo,
+                d.MaLoai,
+                d.DiaChi,
+                d.MaXa,
+                x.TenXa
+            FROM tram_dung d
+            LEFT JOIN xa_phuong x ON d.MaXa = x.MaXa
         """)
         rows = cursor.fetchall()
 
@@ -47,10 +55,14 @@ def map_view(request):
         stops.append({
             "MaTram": r[0],
             "TenTram": r[1],
-            "lat": r[2],       # ViDo
-            "lng": r[3],       # KinhDo
-            "MaLoai": r[4],    # 1 = Bến xe, 2 = Điểm dừng
+            "lat": r[2],        # ViDo
+            "lng": r[3],        # KinhDo
+            "MaLoai": r[4],     # 1 = Station, 2 = Stop
+            "DiaChi": r[5],
+            "MaXa": r[6],
+            "TenXa": r[7],
         })
+
 
     # 2) Load routes WITH full info
     with connection.cursor() as cursor:
@@ -476,44 +488,74 @@ def delete_route_stop_view(request):
         return JsonResponse({"success": False, "error": f"Invalid payload: {e}"}, status=400)
 
     with connection.cursor() as cursor:
-
-        # find STT of the stop being removed
+        # 1) Find STT + distance of the stop being removed
         cursor.execute(
             """
-            SELECT STT FROM tuyen_tram
+            SELECT STT, KhoangCachDenTramTiepTheo
+            FROM tuyen_tram
             WHERE MaTuyen=%s AND Chieu=%s AND MaTram=%s
             """,
-            [ma_tuyen, chieu, ma_tram]
+            [ma_tuyen, chieu, ma_tram],
         )
         row = cursor.fetchone()
         if not row:
-            return JsonResponse({"success": False, "error": "Stop not on route"}, status=404)
+            return JsonResponse({"success": False, "error": "Stop not on this route"}, status=404)
 
         stt_removed = row[0]
+        dist_removed = row[1]  # distance from this stop to its next stop (may be NULL)
 
-        # delete from tuyen_tram
+        # 2) If there is a previous stop, update its distance
+        if stt_removed > 1:
+            # previous stop (STT - 1)
+            cursor.execute(
+                """
+                SELECT MaTram, KhoangCachDenTramTiepTheo
+                FROM tuyen_tram
+                WHERE MaTuyen=%s AND Chieu=%s AND STT=%s
+                """,
+                [ma_tuyen, chieu, stt_removed - 1],
+            )
+            prev_row = cursor.fetchone()
+
+            if prev_row:
+                prev_ma_tram, prev_dist = prev_row[0], prev_row[1]
+
+                # If the removed stop had a next distance:
+                if dist_removed is not None:
+                    # default prev_dist to 0 if NULL
+                    base = prev_dist or 0.0
+                    new_prev_dist = base + float(dist_removed)
+                else:
+                    # removed stop was the last one → previous now has no "next"
+                    new_prev_dist = None
+
+                cursor.execute(
+                    """
+                    UPDATE tuyen_tram
+                    SET KhoangCachDenTramTiepTheo = %s
+                    WHERE MaTuyen=%s AND Chieu=%s AND MaTram=%s
+                    """,
+                    [new_prev_dist, ma_tuyen, chieu, prev_ma_tram],
+                )
+
+        # 3) Delete the row for this stop
         cursor.execute(
             """
             DELETE FROM tuyen_tram
             WHERE MaTuyen=%s AND Chieu=%s AND MaTram=%s
             """,
-            [ma_tuyen, chieu, ma_tram]
+            [ma_tuyen, chieu, ma_tram],
         )
 
-        # shift STT of later stops
+        # 4) Shift STT of all later stops down by 1
         cursor.execute(
             """
             UPDATE tuyen_tram
             SET STT = STT - 1
             WHERE MaTuyen=%s AND Chieu=%s AND STT > %s
             """,
-            [ma_tuyen, chieu, stt_removed]
+            [ma_tuyen, chieu, stt_removed],
         )
-
-        # recompute all distances (reuse logic from add_route_stop_view)
-        # ---------------------------------------------------------------
-        # (I will bundle this into a helper function shortly)
-        # ---------------------------------------------------------------
 
     return JsonResponse({"success": True})
 
