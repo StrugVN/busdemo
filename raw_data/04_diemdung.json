@@ -1,0 +1,39 @@
+{
+  "displayFieldName": "TenDiemDung",
+  "fieldAliases": {
+    "TenDiemDung": "TenTram"
+  },
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 102100,
+    "latestWkid": 3857
+  },
+  "fields": [
+    {
+      "name": "TenDiemDung",
+      "type": "esriFieldTypeString",
+      "alias": "TenTram",
+      "length": 150
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "TenDiemDung": "Bến xe khách Trần Đề"
+      },
+      "geometry": {
+        "x": 11822071.439647147,
+        "y": 1064832.970683942
+      }
+    },
+    {
+      "attributes": {
+        "TenDiemDung": "Bến xe khách Trà Men"
+      },
+      "geometry": {
+        "x": 11795875.625872301,
+        "y": 1075873.8029999004
+      }
+    }
+  ]
+}

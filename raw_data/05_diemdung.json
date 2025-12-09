@@ -1,0 +1,39 @@
+{
+  "displayFieldName": "TenDiemDung",
+  "fieldAliases": {
+    "TenDiemDung": "TenTram"
+  },
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {
+    "wkid": 102100,
+    "latestWkid": 3857
+  },
+  "fields": [
+    {
+      "name": "TenDiemDung",
+      "type": "esriFieldTypeString",
+      "alias": "TenTram",
+      "length": 150
+    }
+  ],
+  "features": [
+    {
+      "attributes": {
+        "TenDiemDung": "Bến xe khách Kế Sách"
+      },
+      "geometry": {
+        "x": 11798235.192788929,
+        "y": 1092338.8948144075
+      }
+    },
+    {
+      "attributes": {
+        "TenDiemDung": "Bến xe khách Sóc Trăng"
+      },
+      "geometry": {
+        "x": 11796714.677641647,
+        "y": 1073028.8025435088
+      }
+    }
+  ]
+}
