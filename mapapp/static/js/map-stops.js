@@ -1,3 +1,113 @@
+let currentlyOpenInfoWindow = null;
+
+
+function getMarkerForStop(maTram) {
+    if (!maTram) return null;
+    return stopMarkers.find(m => m.stopData && m.stopData.MaTram === maTram) || null;
+}
+
+
+function formatDistanceLabel(m) {
+    if (m == null) return "";
+    const value = Number(m);
+    if (isNaN(value)) return "";
+
+    if (value >= 1000) {
+        const km = value / 1000;
+        let s = km.toFixed(2);         // up to 2 decimals
+        s = s.replace(/\.?0+$/, "");   // strip .00 / .10
+        return s + " km";
+    } else {
+        // meters, integer
+        return Math.round(value) + " m";
+    }
+}
+
+function renderRouteStopsPanel(stops) {
+    const panel = document.getElementById("routeStopsPanel");
+    if (!panel) return;
+
+    if (!currentRouteMaTuyen || !stops || stops.length === 0) {
+        panel.style.display = "none";
+        panel.innerHTML = "";
+        return;
+    }
+
+    let html = `
+    <div>
+      <b>Route ${currentRouteMaTuyen}</b>
+    </div>
+    <div style="margin-top:6px;">
+  `;
+
+    stops.forEach((s, idx) => {
+        const name = s.TenTram || s.MaTram;
+        const dist = formatDistanceLabel(s.KhoangCachDenTramTiepTheo);
+        const isLast = idx === stops.length - 1;
+        const rowId = `routeStopRow_${s.MaTram}`;
+
+        html += `
+      <div id="${rowId}" data-matram="${s.MaTram}"
+           style="padding:2px 0; cursor:pointer;">
+        <div>
+          ${s.STT}. ${name}
+        </div>
+
+        ${!isLast
+                ? `
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+
+          <span style="
+            font-size:14px;
+            opacity:0.5;
+            margin-left:10px;">↓</span>
+
+          <span style="
+            font-size:10px;
+            opacity:0.65;">
+            ${dist}
+          </span>
+
+        </div>
+        `
+                : ``
+            }
+      </div>
+    `;
+    });
+
+    html += `</div>`;
+    panel.innerHTML = html;
+    panel.style.display = "block";
+
+    // Attach click handlers to each row
+    stops.forEach((s) => {
+        const row = document.getElementById(`routeStopRow_${s.MaTram}`);
+        if (!row) return;
+
+        row.onclick = () => {
+            const marker = getMarkerForStop(s.MaTram);
+            if (!marker) return;
+
+            const pos = marker.getPosition();
+            if (!pos) return;
+
+            // Zoom toward this stop
+            const targetZoom = 16; // adjust if you want
+            if (map.getZoom() < targetZoom) {
+                map.setZoom(targetZoom);
+            }
+            map.panTo(pos);
+            
+            if (currentlyOpenInfoWindow) {
+                currentlyOpenInfoWindow.close();
+            }
+            // Optional: also open the marker info window
+            google.maps.event.trigger(marker, "click");
+        };
+    });
+}
+
 function openDialog(htmlContent) {
     const dlg = document.getElementById("dialogPanel");
     dlg.innerHTML = htmlContent;
@@ -58,7 +168,7 @@ async function openAddStopPanel(fromStop = false) {
     const panel = document.getElementById("addStopPanel");
     if (!pendingStopLatLng || !currentRouteMaTuyen) return;
 
-    // 1) Fetch existing stops on this route+direction (for info + position)
+    // 1) Fetch existing stops ON THIS ROUTE+DIRECTION for position list only
     let pathStops = [];
     try {
         const res = await fetch(
@@ -72,16 +182,6 @@ async function openAddStopPanel(fromStop = false) {
         console.error(e);
     }
     routeStopsCache = pathStops;
-
-    const stopsHtml =
-        pathStops.length === 0
-            ? "<i>No stops on this route yet.</i>"
-            : pathStops
-                .map(
-                    (s) =>
-                        `${s.STT}. ${s.TenTram || s.MaTram}`
-                )
-                .join("<br/>");
 
     // 2) Dropdown for ALL stops in system (for "Use existing stop")
     let existingOptions = `<option value="">-- New stop point --</option>`;
@@ -117,11 +217,6 @@ async function openAddStopPanel(fromStop = false) {
       <b>Add stop</b><br/>
       Route ${currentRouteMaTuyen} (${currentRouteChieu === "0" ? "Outbound" : "Inbound"})<br/>
       <small>Clicked at: ${lat}, ${lng}</small>
-
-      <div style="margin-top:6px;max-height:80px;overflow:auto;border:1px solid #eee;padding:4px;">
-        <b>Existing stops on this route:</b><br/>
-        ${stopsHtml}
-      </div>
 
       <div style="margin-top:6px;">
         <label style="font-size:12px;">Use existing stop:</label><br/>
@@ -180,11 +275,11 @@ async function openAddStopPanel(fromStop = false) {
             newFields.style.display = "none";
         } else {
             newFields.style.display = "block";
-            reverseGeocodeAndPrefill(pendingStopLatLng);   // <--- trigger geocoding
+            reverseGeocodeAndPrefill(pendingStopLatLng);
         }
     });
 
-    // If right-clicking on an existing stop
+    // If right-clicking an existing stop, preselect it & position
     if (fromStop && pendingRightClickStop) {
         selectExisting.value = pendingRightClickStop.MaTram;
         newFields.style.display = "none";
@@ -194,7 +289,7 @@ async function openAddStopPanel(fromStop = false) {
             insertAfterSelect.value = String(match.STT);
         }
     } else {
-        // New stop by default -> auto geocode on open
+        // New stop by default → auto geocode on open
         if (!selectExisting.value) {
             reverseGeocodeAndPrefill(pendingStopLatLng);
         }
@@ -208,6 +303,7 @@ async function openAddStopPanel(fromStop = false) {
 
     document.getElementById("saveStopBtn").onclick = saveStopFromPanel;
 }
+
 
 async function saveStopFromPanel() {
     const panel = document.getElementById("addStopPanel");
@@ -304,6 +400,12 @@ function createStopMarker(stop) {
     const info = new google.maps.InfoWindow();
 
     marker.addListener("click", () => {
+        if (currentlyOpenInfoWindow) {
+            currentlyOpenInfoWindow.close();
+        }
+        currentlyOpenInfoWindow = info;
+
+
         const onRoute = currentRouteStopIds && currentRouteStopIds.has(stop.MaTram);
 
         const removeButtonHtml = onRoute
@@ -403,6 +505,8 @@ async function updateStopIconsForCurrentRoute() {
                 marker.setIcon(iconTriangleRed);
             }
         });
+        currentRouteStopIds = new Set();
+        renderRouteStopsPanel([]);
         return;
     }
 
@@ -418,7 +522,9 @@ async function updateStopIconsForCurrentRoute() {
         const stops = data.stops || [];
 
         const onRouteSet = new Set(stops.map(s => s.MaTram));
-        currentRouteStopIds = onRouteSet;  // <-- add this
+        currentRouteStopIds = onRouteSet;
+
+        renderRouteStopsPanel(stops);
 
         stopMarkers.forEach(marker => {
             const maTram = marker.stopData?.MaTram;
