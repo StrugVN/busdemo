@@ -2,7 +2,7 @@ let currentlyOpenInfoWindow = null;
 let pathResultData = null;       // full response from /shortest-path
 let bestPathIndex = null;        // data.best_index
 let selectedPathIndex = null;    // which path is shown in "Path:"
-
+let selectedOverlayPolylines = [];
 
 function getMarkerForStop(maTram) {
     if (!maTram) return null;
@@ -411,7 +411,6 @@ function createStopMarker(stop) {
         }
         currentlyOpenInfoWindow = info;
 
-
         const onRoute = currentRouteStopIds && currentRouteStopIds.has(stop.MaTram);
 
         const removeButtonHtml = onRoute
@@ -423,49 +422,68 @@ function createStopMarker(stop) {
         </button>`
             : "";
 
+        // Decide which path selection buttons to show
+        let pathButtonsHtml = "";
+
+        if (!pathStartStopId && !pathEndStopId) {
+            // No selection yet -> allow setting Start
+            pathButtonsHtml = `
+                <div style="display:flex; gap:4px; margin-top:8px;">
+                  <button id="setStartBtn_${stop.MaTram}"
+                          style="flex:1; padding:3px 5px; border-radius:4px;
+                                  border:1px solid #4CAF50; background:#4CAF50; color:white; cursor:pointer;">
+                    Start
+                  </button>
+                </div>
+            `;
+        } else if (pathStartStopId && !pathEndStopId) {
+            // Start is chosen, waiting for End -> only allow End
+            pathButtonsHtml = `
+                <div style="display:flex; gap:4px; margin-top:8px;">
+                  <button id="setEndBtn_${stop.MaTram}"
+                          style="flex:1; padding:3px 5px; border-radius:4px;
+                                  border:1px solid #FF9800; background:#FF9800; color:white; cursor:pointer;">
+                    End
+                  </button>
+                </div>
+            `;
+        } else {
+            // Both start and end already selected -> hide path buttons
+            pathButtonsHtml = "";
+        }
+
         const content = `
-      <div style="min-width:230px">
-        <b>${stop.TenTram || stop.MaTram}</b><br/>
-        Code: ${stop.MaTram}<br/>
-        Type: ${stop.MaLoai == 1 ? "Station" : "Stop"}<br/>
-        Address: ${stop.DiaChi || "N/A"}<br/>
-        Ward: ${stop.TenXa || "N/A"}<br/>
+            <div style="min-width:230px">
+                <b>${stop.TenTram || stop.MaTram}</b><br/>
+                Code: ${stop.MaTram}<br/>
+                Type: ${stop.MaLoai == 1 ? "Station" : "Stop"}<br/>
+                Address: ${stop.DiaChi || "N/A"}<br/>
+                Ward: ${stop.TenXa || "N/A"}<br/>
 
-        <!-- NEW: Start / End selection -->
-        <div style="display:flex; gap:4px; margin-top:8px;">
-          <button id="setStartBtn_${stop.MaTram}"
-                  style="flex:1; padding:3px 5px; border-radius:4px;
-                         border:1px solid #4CAF50; background:#4CAF50; color:white; cursor:pointer;">
-            Start
-          </button>
-          <button id="setEndBtn_${stop.MaTram}"
-                  style="flex:1; padding:3px 5px; border-radius:4px;
-                         border:1px solid #FF9800; background:#FF9800; color:white; cursor:pointer;">
-            End
-          </button>
-        </div>
+                ${pathButtonsHtml}
 
-        <div style="display:flex; gap:4px; margin-top:8px;">
-          <button id="editStopBtn_${stop.MaTram}"
-                  style="flex:1; padding:4px 6px; border-radius:4px;
-                         border:1px solid #ddd; background:#fafafa; cursor:pointer;">
-            Edit
-          </button>
+                <div style="display:flex; gap:4px; margin-top:8px;">
+                  <button id="editStopBtn_${stop.MaTram}"
+                          style="flex:1; padding:4px 6px; border-radius:4px;
+                                  border:1px solid #ddd; background:#fafafa; cursor:pointer;">
+                    Edit
+                  </button>
 
-          ${removeButtonHtml}
+                  ${removeButtonHtml}
 
-          <button id="moveStopBtn_${stop.MaTram}"
-                  style="flex:1; padding:4px 6px; border-radius:4px;
-                         border:1px solid #2196F3; background:#2196F3; color:white; cursor:pointer;">
-            Move
-          </button>
-        </div>
-      </div>
-    `;
+                  <button id="moveStopBtn_${stop.MaTram}"
+                          style="flex:1; padding:4px 6px; border-radius:4px;
+                                  border:1px solid #2196F3; background:#2196F3; color:white; cursor:pointer;">
+                    Move
+                  </button>
+                </div>
+            </div>
+        `;
 
         info.setContent(content);
         info.open(map, marker);
 
+        // IMPORTANT: use `info`, not `infoWindow`
         google.maps.event.addListenerOnce(info, "domready", () => {
             const startBtn = document.getElementById(`setStartBtn_${stop.MaTram}`);
             const endBtn = document.getElementById(`setEndBtn_${stop.MaTram}`);
@@ -473,11 +491,18 @@ function createStopMarker(stop) {
             const deleteBtn = document.getElementById(`deleteStopBtn_${stop.MaTram}`);
             const moveBtn = document.getElementById(`moveStopBtn_${stop.MaTram}`);
 
-            if (startBtn) {
-                startBtn.onclick = () => handleSetAsStart(stop, marker);
+            if (startBtn && typeof handleSetAsStart === "function") {
+                startBtn.onclick = () => {
+                    handleSetAsStart(stop, marker);
+                    info.close();  // close after selecting Start
+                };
             }
-            if (endBtn) {
-                endBtn.onclick = () => handleSetAsEnd(stop, marker);
+
+            if (endBtn && typeof handleSetAsEnd === "function") {
+                endBtn.onclick = () => {
+                    handleSetAsEnd(stop, marker);
+                    info.close();  // close after selecting End
+                };
             }
 
             if (moveBtn) {
@@ -500,7 +525,6 @@ function createStopMarker(stop) {
                 };
             }
         });
-
     });
 
     // Right-click on a stop to add it into the current route at some position
@@ -510,18 +534,15 @@ function createStopMarker(stop) {
             return;
         }
 
-        // Use this stop's position as the click location
         pendingStopLatLng = marker.getPosition();
-        // Remember which stop was right-clicked so the panel can preselect it
         pendingRightClickStop = marker.stopData;
 
-        // Open the "Add stop" panel in "fromStop=true" mode
         openAddStopPanel(true);
     });
 
-
     stopMarkers.push(marker);
 }
+
 
 
 async function updateStopIconsForCurrentRoute() {
@@ -779,6 +800,7 @@ async function requestShortestPath(startMaTram, endMaTram) {
         selectedPathIndex = bestPathIndex;   // default: shortest path selected
 
         renderAllPaths();                    // new renderer (section 5)
+        renderSelectedOverlay();
         updatePathPanel(getSelectedPath());  // selected path summary
         updatePathList();                    // list of all paths
     } catch (err) {
@@ -968,236 +990,305 @@ function edgeKey(edge) {
 }
 
 function getSelectedPath() {
-  if (!pathResultData || !Array.isArray(pathResultData.paths)) return null;
-  if (selectedPathIndex == null) return null;
-  return pathResultData.paths[selectedPathIndex] || null;
+    if (!pathResultData || !Array.isArray(pathResultData.paths)) return null;
+    if (selectedPathIndex == null) return null;
+    return pathResultData.paths[selectedPathIndex] || null;
 }
 
 function renderAllPaths() {
-  clearCurrentPathLines();
-  if (typeof clearAllRoutesPolylines === "function") {
-    clearAllRoutesPolylines();
-  }
+    clearCurrentPathLines();
+    if (typeof clearAllRoutesPolylines === "function") {
+        clearAllRoutesPolylines();
+    }
 
-  if (!pathResultData || !Array.isArray(pathResultData.paths) || pathResultData.paths.length === 0) {
-    updatePathPanel(null);
-    return;
-  }
+    if (!pathResultData || !Array.isArray(pathResultData.paths) || pathResultData.paths.length === 0) {
+        updatePathPanel(null);
+        return;
+    }
 
-  const paths = pathResultData.paths;
-  const bestIdx = bestPathIndex ?? 0;
-  const selIdx = selectedPathIndex ?? bestIdx;
-  const bounds = new google.maps.LatLngBounds();
+    const paths = pathResultData.paths;
+    const bestIdx = bestPathIndex ?? 0;
+    const selIdx = selectedPathIndex ?? bestIdx;
+    const bounds = new google.maps.LatLngBounds();
 
-  const drawnEdges = new Set();
+    const drawnEdges = new Set();
 
-  // ----- 1) Draw SHORTEST path (solid, colored segments with arrows) -----
-  const bestPath = paths[bestIdx];
-  const segs = bestPath.segments || [];
-  const mainPalette = [
-    "#e41a1c", "#377eb8", "#4daf4a", "#984ea3",
-    "#ff7f00", "#a65628", "#f781bf", "#999999",
-  ];
+    // ----- 1) Draw SHORTEST path (solid, colored segments with arrows) -----
+    const bestPath = paths[bestIdx];
+    const segs = bestPath.segments || [];
+    const mainPalette = [
+        "#e41a1c", "#377eb8", "#4daf4a", "#984ea3",
+        "#ff7f00", "#a65628", "#f781bf", "#999999",
+    ];
 
-  segs.forEach((seg, idx) => {
-    const coords = seg.coords || [];
-    if (coords.length < 2) return;
+    segs.forEach((seg, idx) => {
+        const coords = seg.coords || [];
+        if (coords.length < 2) return;
 
-    const gSegPath = coords.map(p => new google.maps.LatLng(p.lat, p.lng));
-    const color = mainPalette[idx % mainPalette.length];
-
-    const pl = new google.maps.Polyline({
-      path: gSegPath,
-      map: map,
-      strokeColor: color,
-      strokeOpacity: 0.95,
-      strokeWeight: 5,
-      icons: [{
-        icon: { path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3 },
-        offset: "20px",
-        repeat: "80px",
-      }],
-    });
-
-    currentPathPolylines.push(pl);
-    gSegPath.forEach(ll => bounds.extend(ll));
-  });
-
-  // mark edges of shortest path as drawn
-  (bestPath.edges || []).forEach(e => {
-    drawnEdges.add(edgeKey(e));
-  });
-
-  // ----- 2) Draw SELECTED path (if different) as dashed multi-color by route -----
-  if (selIdx !== bestIdx) {
-    const selPath = paths[selIdx];
-    const edges = selPath.edges || [];
-    if (edges.length) {
-      const colorPalette = [
-        "#0000aa", "#00aa00", "#aa00aa", "#aa5500",
-        "#008888", "#5555aa", "#aa0055", "#557700",
-      ];
-      let currentCoords = [];
-      let currentColor = colorPalette[0];
-      let colorIdx = 0;
-      let currentRouteKey = null; // MaTuyen|Chieu
-
-      function flushSelSegment() {
-        if (currentCoords.length < 2) return;
-        const gPath = currentCoords.map(p => new google.maps.LatLng(p.lat, p.lng));
+        const gSegPath = coords.map(p => new google.maps.LatLng(p.lat, p.lng));
+        const color = mainPalette[idx % mainPalette.length];
 
         const pl = new google.maps.Polyline({
-          path: gPath,
-          map: map,
-          strokeColor: currentColor,
-          strokeOpacity: 0,  // dashed only
-          strokeWeight: 4,
-          icons: [{
-            icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 2 },
-            offset: "0",
-            repeat: "16px",
-          }],
+            path: gSegPath,
+            map: map,
+            strokeColor: color,
+            strokeOpacity: 0.95,
+            strokeWeight: 5,
+            icons: [{
+                icon: { path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3 },
+                offset: "20px",
+                repeat: "80px",
+            }],
         });
 
         currentPathPolylines.push(pl);
-        gPath.forEach(ll => bounds.extend(ll));
-        currentCoords = [];
-      }
-
-      edges.forEach(e => {
-        const key = edgeKey(e);
-        const coords = e.coords || [];
-        const routeKey = e.MaTuyen + "|" + e.Chieu;
-
-        if (drawnEdges.has(key) || coords.length === 0) {
-          flushSelSegment();
-          return;
-        }
-
-        // new route run -> new color, flush previous
-        if (routeKey !== currentRouteKey && currentCoords.length) {
-          flushSelSegment();
-        }
-        if (routeKey !== currentRouteKey) {
-          currentRouteKey = routeKey;
-          currentColor = colorPalette[colorIdx % colorPalette.length];
-          colorIdx++;
-        }
-
-        drawnEdges.add(key);
-
-        if (!currentCoords.length) {
-          currentCoords = coords.slice();
-        } else {
-          currentCoords = currentCoords.concat(coords.slice(1));
-        }
-      });
-
-      flushSelSegment();
-    }
-  }
-
-  // ----- 3) Draw all OTHER paths (single-color dashed, only non-overlap) -----
-  const altPalette = [
-    "#000000", "#555555", "#880000", "#006666",
-    "#666600", "#660066", "#006600", "#444488",
-    "#884444", "#008888"
-  ];
-  let altColorIndex = 0;
-
-  paths.forEach((p, idx) => {
-    if (idx === bestIdx || idx === selIdx) return;
-    const edges = p.edges || [];
-    if (!edges.length) return;
-
-    const color = altPalette[altColorIndex % altPalette.length];
-    altColorIndex++;
-
-    let coordsAccum = [];
-
-    function flushAlt() {
-      if (coordsAccum.length < 2) return;
-      const gPath = coordsAccum.map(p => new google.maps.LatLng(p.lat, p.lng));
-
-      const pl = new google.maps.Polyline({
-        path: gPath,
-        map: map,
-        strokeColor: color,
-        strokeOpacity: 0,
-        strokeWeight: 3,
-        icons: [{
-          icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 2 },
-          offset: "0",
-          repeat: "16px",
-        }],
-      });
-
-      currentPathPolylines.push(pl);
-      gPath.forEach(ll => bounds.extend(ll));
-      coordsAccum = [];
-    }
-
-    edges.forEach(e => {
-      const key = edgeKey(e);
-      const coords = e.coords || [];
-      if (drawnEdges.has(key) || coords.length === 0) {
-        flushAlt();
-        return;
-      }
-      drawnEdges.add(key);
-
-      if (!coordsAccum.length) {
-        coordsAccum = coords.slice();
-      } else {
-        coordsAccum = coordsAccum.concat(coords.slice(1));
-      }
+        gSegPath.forEach(ll => bounds.extend(ll));
     });
 
-    flushAlt();
-  });
+    // mark edges of shortest path as drawn
+    (bestPath.edges || []).forEach(e => {
+        drawnEdges.add(edgeKey(e));
+    });
 
-  if (!bounds.isEmpty()) {
-    map.fitBounds(bounds);
-  }
+    // ----- 2) Draw SELECTED path (if different) as dashed multi-color by route -----
+    if (selIdx !== bestIdx) {
+        const selPath = paths[selIdx];
+        const edges = selPath.edges || [];
+        if (edges.length) {
+            const colorPalette = [
+                "#0000aa", "#00aa00", "#aa00aa", "#aa5500",
+                "#008888", "#5555aa", "#aa0055", "#557700",
+            ];
+            let currentCoords = [];
+            let currentColor = colorPalette[0];
+            let colorIdx = 0;
+            let currentRouteKey = null; // MaTuyen|Chieu
 
-  // "Path" summary = currently selected path
-  updatePathPanel(getSelectedPath());
+            function flushSelSegment() {
+                if (currentCoords.length < 2) return;
+                const gPath = currentCoords.map(p => new google.maps.LatLng(p.lat, p.lng));
+
+                const pl = new google.maps.Polyline({
+                    path: gPath,
+                    map: map,
+                    strokeColor: currentColor,
+                    strokeOpacity: 0,  // dashed only
+                    strokeWeight: 4,
+                    icons: [{
+                        icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 2 },
+                        offset: "0",
+                        repeat: "16px",
+                    }],
+                });
+
+                currentPathPolylines.push(pl);
+                gPath.forEach(ll => bounds.extend(ll));
+                currentCoords = [];
+            }
+
+            edges.forEach(e => {
+                const key = edgeKey(e);
+                const coords = e.coords || [];
+                const routeKey = e.MaTuyen + "|" + e.Chieu;
+
+                if (drawnEdges.has(key) || coords.length === 0) {
+                    flushSelSegment();
+                    return;
+                }
+
+                // new route run -> new color, flush previous
+                if (routeKey !== currentRouteKey && currentCoords.length) {
+                    flushSelSegment();
+                }
+                if (routeKey !== currentRouteKey) {
+                    currentRouteKey = routeKey;
+                    currentColor = colorPalette[colorIdx % colorPalette.length];
+                    colorIdx++;
+                }
+
+                drawnEdges.add(key);
+
+                if (!currentCoords.length) {
+                    currentCoords = coords.slice();
+                } else {
+                    currentCoords = currentCoords.concat(coords.slice(1));
+                }
+            });
+
+            flushSelSegment();
+        }
+    }
+
+    // ----- 3) Draw all OTHER paths (single-color dashed, only non-overlap) -----
+    const altPalette = [
+        "#000000", "#555555", "#880000", "#006666",
+        "#666600", "#660066", "#006600", "#444488",
+        "#884444", "#008888"
+    ];
+    let altColorIndex = 0;
+
+    paths.forEach((p, idx) => {
+        if (idx === bestIdx || idx === selIdx) return;
+        const edges = p.edges || [];
+        if (!edges.length) return;
+
+        const color = altPalette[altColorIndex % altPalette.length];
+        altColorIndex++;
+
+        let coordsAccum = [];
+
+        function flushAlt() {
+            if (coordsAccum.length < 2) return;
+            const gPath = coordsAccum.map(p => new google.maps.LatLng(p.lat, p.lng));
+
+            const pl = new google.maps.Polyline({
+                path: gPath,
+                map: map,
+                strokeColor: color,
+                strokeOpacity: 0,
+                strokeWeight: 3,
+                icons: [{
+                    icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 2 },
+                    offset: "0",
+                    repeat: "16px",
+                }],
+            });
+
+            currentPathPolylines.push(pl);
+            gPath.forEach(ll => bounds.extend(ll));
+            coordsAccum = [];
+        }
+
+        edges.forEach(e => {
+            const key = edgeKey(e);
+            const coords = e.coords || [];
+            if (drawnEdges.has(key) || coords.length === 0) {
+                flushAlt();
+                return;
+            }
+            drawnEdges.add(key);
+
+            if (!coordsAccum.length) {
+                coordsAccum = coords.slice();
+            } else {
+                coordsAccum = coordsAccum.concat(coords.slice(1));
+            }
+        });
+
+        flushAlt();
+    });
+
+    if (!bounds.isEmpty()) {
+        map.fitBounds(bounds);
+    }
+
+    // "Path" summary = currently selected path
+    updatePathPanel(getSelectedPath());
 }
 
 function updatePathList() {
-  const listEl = document.getElementById("pathList");
-  if (!listEl) return;
+    const listEl = document.getElementById("pathList");
+    if (!listEl) return;
 
-  listEl.innerHTML = "";
+    listEl.innerHTML = "";
 
-  if (!pathResultData || !Array.isArray(pathResultData.paths)) {
-    listEl.textContent = "(none)";
-    return;
-  }
+    if (!pathResultData || !Array.isArray(pathResultData.paths)) {
+        listEl.textContent = "(none)";
+        return;
+    }
 
-  const paths = pathResultData.paths;
+    const paths = pathResultData.paths;
 
-  paths.forEach((p, idx) => {
-    const row = document.createElement("div");
-    row.className = "path-list-item" + (idx === selectedPathIndex ? " selected" : "");
+    paths.forEach((p, idx) => {
+        const row = document.createElement("div");
+        row.className = "path-list-item" + (idx === selectedPathIndex ? " selected" : "");
 
-    const indexSpan = document.createElement("span");
-    indexSpan.className = "path-list-index";
-    indexSpan.textContent = (idx + 1) + (idx === bestPathIndex ? "★" : "");
+        const indexSpan = document.createElement("span");
+        indexSpan.className = "path-list-index";
+        indexSpan.textContent = (idx + 1) + (idx === bestPathIndex ? "★" : "");
 
-    const distSpan = document.createElement("span");
-    distSpan.className = "path-list-distance";
-    distSpan.textContent = formatDistance(p.total_distance);
+        const distSpan = document.createElement("span");
+        distSpan.className = "path-list-distance";
+        distSpan.textContent = formatDistance(p.total_distance);
 
-    row.appendChild(indexSpan);
-    row.appendChild(distSpan);
+        row.appendChild(indexSpan);
+        row.appendChild(distSpan);
 
-    row.addEventListener("click", () => {
-      selectedPathIndex = idx;
-      renderAllPaths();                    // re-render with this as priority
-      updatePathList();                    // refresh highlighting
+        row.addEventListener("click", () => {
+            selectedPathIndex = idx;
+            renderAllPaths();                    // re-render with this as priority
+            renderSelectedOverlay();
+            updatePathList();                    // refresh highlighting
+        });
+
+        listEl.appendChild(row);
     });
-
-    listEl.appendChild(row);
-  });
 }
+
+function clearSelectedOverlay() {
+    selectedOverlayPolylines.forEach(pl => pl.setMap(null));
+    selectedOverlayPolylines = [];
+}
+
+function renderSelectedOverlay() {
+    clearSelectedOverlay();
+
+    if (!pathResultData || !Array.isArray(pathResultData.paths)) return;
+
+    const paths = pathResultData.paths;
+    const bestIdx = bestPathIndex ?? 0;
+    const selIdx = selectedPathIndex ?? bestIdx;
+
+    // If selected is the shortest path, no overlay
+    if (selIdx === bestIdx) return;
+
+    const path = paths[selIdx];
+    if (!path) return;
+
+    const segs = path.segments || [];
+    const fullCoords = path.polyline || [];
+    if (!segs.length || fullCoords.length < 2) return;
+
+    // 1) Base black line for the WHOLE selected path (highlighter)
+    const gFullPath = fullCoords.map(p => new google.maps.LatLng(p.lat, p.lng));
+    const baseLine = new google.maps.Polyline({
+        path: gFullPath,
+        map: map,
+        strokeColor: "#000000",
+        strokeOpacity: 0.75,   // visible but not overpowering
+        strokeWeight: 5,
+        zIndex: 48,            // below colored segments, above other dash spam
+    });
+    selectedOverlayPolylines.push(baseLine);
+
+    // 2) Colored disconnected subpaths per route on top of the black line
+    const overlayPalette = [
+        "#ff00ff", "#00e5ff", "#ffea00", "#ff6d00",
+        "#64dd17", "#d500f9", "#00c853", "#ff1744",
+    ];
+
+    segs.forEach((seg, idx) => {
+        const coords = seg.coords || [];
+        if (coords.length < 2) return;
+
+        const gPath = coords.map(p => new google.maps.LatLng(p.lat, p.lng));
+        const color = overlayPalette[idx % overlayPalette.length];
+
+        const pl = new google.maps.Polyline({
+            path: gPath,
+            map: map,
+            strokeColor: color,
+            strokeOpacity: 0,        // only dashes, no solid
+            strokeWeight: 6,         // thick, very visible on top of black
+            zIndex: 50,              // top-most
+            icons: [{
+                icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 },
+                offset: "0",
+                repeat: "14px",
+            }],
+        });
+
+        selectedOverlayPolylines.push(pl);
+    });
+}
+

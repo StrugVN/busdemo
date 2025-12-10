@@ -136,13 +136,30 @@ function updatePathStatusPanel() {
 }
 
 function resetPathSelection() {
+  // Clear selection state
   pathStartStopId = null;
   pathEndStopId = null;
   pathStartMarker = null;
   pathEndMarker = null;
+
+  // Clear path search result
+  pathResultData = null;
+  bestPathIndex = null;
+  selectedPathIndex = null;
+
+  // Clear drawings
   clearCurrentPathLines();
+  if (typeof clearSelectedOverlay === "function") {
+    clearSelectedOverlay();
+  }
+
+  // Reset UI
   updatePathPanel(null);
+  if (typeof updatePathList === "function") {
+    updatePathList();
+  }
 }
+
 
 
 // initMap – full logic: overlay, markers, click handlers

@@ -10,12 +10,17 @@ window.onload = function () {
     document.getElementById("applyRouteChangesBtn").addEventListener("click", applyRouteChanges);
     document.getElementById("cancelRouteChangesBtn").addEventListener("click", cancelRouteChanges);
 
-    const clearBtn = document.getElementById("clearPathBtn");
-    if (clearBtn) {
-        clearBtn.addEventListener("click", () => {
+    const clearPathBtn = document.getElementById("clearPathBtn");
+    if (clearPathBtn) {
+        clearPathBtn.addEventListener("click", () => {
             resetPathSelection();
-            // redraw normal routes again
-            loadAndDrawRoute();
+
+            // Redraw the base routes like normal (no path overlay)
+            if (typeof loadAndDrawRoute === "function") {
+                loadAndDrawRoute();
+            } else if (typeof loadAllRoutesForCurrentDirection === "function") {
+                loadAllRoutesForCurrentDirection();
+            }
         });
     }
 
