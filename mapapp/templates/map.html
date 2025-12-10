@@ -65,6 +65,13 @@
       <option value="0">Chiều đi</option>
       <option value="1">Chiều về</option>
     </select>
+
+    <!-- NEW: New route button (right side) -->
+    <button id="newRouteBtn" type="button" style="float:right;padding:4px 10px;margin-right:8px;
+                 background:#2196F3;color:white;border:none;
+                 border-radius:4px;cursor:pointer;">
+      New route
+    </button>
   </div>
 
   <div id="routeStopsPanel" style="position:absolute;top:56px;left:10px;width:260px;
@@ -144,6 +151,7 @@
     const UPDATE_STOP_INFO_URL = "{% url 'update_stop_info' %}";
     const UPDATE_ROUTE_INFO_URL = "{% url 'update_route_info' %}";
     const STOP_ROUTES_URL = "{% url 'stop_routes' %}";
+    const NEW_ROUTE_URL = "{% url 'new_route' %}"; 
   </script>
 
   <script src="{% static 'js/map-core.js' %}"></script>

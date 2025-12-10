@@ -718,7 +718,7 @@ def shortest_path_view(request):
 
         return graph, node_info
 
-    def enumerate_all_paths(graph, start_node, end_node, max_paths=200, max_len=100):
+    def enumerate_all_paths(graph, start_node, end_node, max_paths=1000, max_len=300):
         """
         DFS over the directed graph, collecting all simple paths from start_node to end_node.
         - No node is visited twice in the same path -> no cycle.
@@ -1040,3 +1040,47 @@ def stop_routes_view(request):
         for r in rows
     ]
     return JsonResponse({"success": True, "routes": routes})
+
+
+@csrf_exempt
+@require_POST
+def new_route_view(request):
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+        ma_tuyen = (data.get("MaTuyen") or "").strip()
+        ten_tuyen = (data.get("TenTuyen") or "").strip() or None
+        vertices = data.get("Vertices") or []
+    except Exception as e:
+        return JsonResponse({"success": False, "error": f"Invalid payload: {e}"}, status=400)
+
+    if not ma_tuyen:
+        return JsonResponse({"success": False, "error": "MaTuyen is required"}, status=400)
+    if len(vertices) < 2:
+        return JsonResponse({"success": False, "error": "At least 2 vertices required"}, status=400)
+
+    def build_linestring(points):
+        coords = []
+        for p in points:
+            lat = float(p["lat"])
+            lng = float(p["lng"])
+            coords.append(f"{lng} {lat}")  # WKT = lon lat
+        return "LINESTRING(" + ", ".join(coords) + ")"
+
+    wkt = build_linestring(vertices)
+    wkt_rev = build_linestring(list(reversed(vertices)))  # Path_Nguoc = flipped order
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO tuyen_bus
+                    (MaTuyen, TenTuyen, Path, Path_Nguoc)
+                VALUES
+                    (%s, %s, ST_GeomFromText(%s, 4326), ST_GeomFromText(%s, 4326))
+                """,
+                [ma_tuyen, ten_tuyen, wkt, wkt_rev],
+            )
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=400)
+
+    return JsonResponse({"success": True})

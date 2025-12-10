@@ -14,8 +14,6 @@ window.onload = function () {
     if (clearPathBtn) {
         clearPathBtn.addEventListener("click", () => {
             resetPathSelection();
-
-            // Redraw the base routes like normal (no path overlay)
             if (typeof loadAndDrawRoute === "function") {
                 loadAndDrawRoute();
             } else if (typeof loadAllRoutesForCurrentDirection === "function") {
@@ -23,6 +21,22 @@ window.onload = function () {
             }
         });
     }
+
+    const newRouteBtn = document.getElementById("newRouteBtn");
+    if (newRouteBtn) {
+        newRouteBtn.addEventListener("click", () => {
+            if (!newRouteDrawingMode) {
+                // start drawing
+                beginNewRouteDrawing();
+                newRouteBtn.textContent = "Finish route";
+            } else {
+                // finish drawing
+                finishNewRouteDrawing();
+                newRouteBtn.textContent = "New route";
+            }
+        });
+    }
+
 
     if (typeof updatePathPanel === "function") {
         updatePathPanel(null);

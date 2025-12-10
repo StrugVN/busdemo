@@ -1,6 +1,11 @@
 // ----- GLOBALS -----
 let allRoutesPolylines = [];
 
+let newRouteDrawingMode = false;
+let newRouteTempPolyline = null;
+let newRouteTempPath = null;
+let newRouteClickListener = null;
+
 function enforceMinZoom(minZoom = 12) {
     const listener = google.maps.event.addListener(map, "idle", function () {
         if (map.getZoom() < minZoom) {
@@ -78,8 +83,8 @@ async function loadAllRoutesForCurrentDirection() {
     }
 
     if (!bounds.isEmpty()) {
-        map.fitBounds(bounds);
-        enforceMinZoom(10);
+        map.setCenter({ lat: 9.602097, lng: 105.973469 });
+        map.setZoom(11);
     }
 
 }
@@ -593,4 +598,193 @@ function computeRouteLengthKm(polyline) {
         total += google.maps.geometry.spherical.computeDistanceBetween(p1, p2);
     }
     return total / 1000; // convert meters → km
+}
+
+function cleanupNewRouteDrawing() {
+    newRouteDrawingMode = false;
+
+    if (newRouteClickListener) {
+        google.maps.event.removeListener(newRouteClickListener);
+        newRouteClickListener = null;
+    }
+    if (newRouteTempPolyline) {
+        newRouteTempPolyline.setMap(null);
+        newRouteTempPolyline = null;
+    }
+    newRouteTempPath = null;
+
+    // reset button label if present
+    const newRouteBtn = document.getElementById("newRouteBtn");
+    if (newRouteBtn) {
+        newRouteBtn.textContent = "New route";
+    }
+}
+
+
+function beginNewRouteDrawing() {
+    if (newRouteDrawingMode) {
+        cleanupNewRouteDrawing();
+    }
+
+    if (editMode) {
+        exitRouteEditMode();
+    }
+
+    const routeSelect = document.getElementById("routeSelect");
+    if (routeSelect) {
+        routeSelect.value = "";
+    }
+    currentRouteMaTuyen = null;
+
+    if (currentPolyline) {
+        currentPolyline.setMap(null);
+        currentPolyline = null;
+    }
+    clearAllRoutesPolylines();
+    if (typeof updateStopIconsForCurrentRoute === "function") {
+        updateStopIconsForCurrentRoute();
+    }
+
+    newRouteDrawingMode = true;
+
+    newRouteTempPath = new google.maps.MVCArray();
+    newRouteTempPolyline = new google.maps.Polyline({
+        map: map,
+        path: newRouteTempPath,
+        strokeColor: "#0d47a1",
+        strokeWeight: 2,
+        editable: true
+    });
+
+    showMessage("Bấm để thêm đường, bấm 'Finish route' khi xong.", 12000);
+
+    // only single-click adds vertices
+    newRouteClickListener = map.addListener("click", (e) => {
+        if (!newRouteDrawingMode || !newRouteTempPath) return;
+        newRouteTempPath.push(e.latLng);
+    });
+}
+
+
+function finishNewRouteDrawing() {
+    if (!newRouteDrawingMode || !newRouteTempPath) return;
+
+    if (newRouteTempPath.getLength() < 2) {
+        showMessage("Route needs at least 2 points.", 4000);
+        return;
+    }
+
+    const vertices = [];
+    for (let i = 0; i < newRouteTempPath.getLength(); i++) {
+        const p = newRouteTempPath.getAt(i);
+        vertices.push({ lat: p.lat(), lng: p.lng() });
+    }
+
+    const content = `
+      <div>
+        <h3 style="margin-top:0;margin-bottom:8px;">New route</h3>
+
+        <label style="font-size:12px;">Route code (MaTuyen):</label><br/>
+        <input id="newRouteCode" type="text"
+               style="width:100%;margin-bottom:6px;padding:3px 4px;" />
+
+        <label style="font-size:12px;">Route name (TenTuyen):</label><br/>
+        <input id="newRouteName" type="text"
+               style="width:100%;margin-bottom:10px;padding:3px 4px;" />
+
+        <div style="text-align:right;">
+          <button id="newRouteCancelBtn"
+                  style="margin-right:6px;padding:4px 8px;border-radius:4px;
+                         border:1px solid #ddd;background:#fafafa;cursor:pointer;">
+            Cancel
+          </button>
+          <button id="newRouteSaveBtn"
+                  style="padding:4px 10px;border-radius:4px;border:none;
+                         background:#2196F3;color:white;cursor:pointer;">
+            Save
+          </button>
+        </div>
+      </div>
+    `;
+
+    openDialog(content);
+
+    const dlg = document.getElementById("dialogPanel");
+    const cancelBtn = dlg.querySelector("#newRouteCancelBtn");
+    const saveBtn = dlg.querySelector("#newRouteSaveBtn");
+
+    cancelBtn.onclick = () => {
+        closeDialog();
+        cleanupNewRouteDrawing();
+    };
+
+    saveBtn.onclick = async () => {
+        const code = dlg.querySelector("#newRouteCode").value.trim();
+        const name = dlg.querySelector("#newRouteName").value.trim();
+
+        if (!code) {
+            showMessage("Please enter MaTuyen.", 3000);
+            return;
+        }
+
+        try {
+            showMessage("Creating route...");
+
+            const res = await fetch(NEW_ROUTE_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    MaTuyen: code,
+                    TenTuyen: name,
+                    Vertices: vertices
+                })
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+                showMessage("Failed to create route: " + (data.error || ""), 5000);
+                return;
+            }
+
+            // Update local list
+            const newRoute = {
+                MaTuyen: code,
+                TenTuyen: name,
+                DoDai: null,
+                GiaVe: null,
+                ThoiGianToanTuyen: null,
+                GioBatDay: null,
+                GioKetThuc: null,
+                ThoiGianGiua2Tuyen: null,
+                SoChuyen: null
+            };
+            ROUTES.push(newRoute);
+            ROUTE_INFO[code] = newRoute;
+
+            // Add to dropdown
+            const sel = document.getElementById("routeSelect");
+            if (sel) {
+                const opt = document.createElement("option");
+                opt.value = code;
+                opt.textContent = `${code} - ${name}`;
+                sel.appendChild(opt);
+                sel.value = code;
+            }
+
+            // Default direction = 0 (Chiều đi)
+            const dirSel = document.getElementById("directionSelect");
+            if (dirSel) {
+                dirSel.value = "0";
+            }
+
+            closeDialog();
+            cleanupNewRouteDrawing();
+
+            // Load from backend so Path / Path_Nguoc are used like normal
+            await loadAndDrawRoute();
+        } catch (err) {
+            console.error(err);
+            showMessage("Error creating route.", 5000);
+        }
+    };
 }
