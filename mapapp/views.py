@@ -1012,3 +1012,31 @@ def update_route_info_view(request):
         )
 
     return JsonResponse({"success": True})
+
+def stop_routes_view(request):
+    ma_tram = request.GET.get("MaTram")
+    if not ma_tram:
+        return JsonResponse({"success": False, "error": "Missing MaTram"}, status=400)
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT tt.MaTuyen,
+                   tt.Chieu,
+                   tb.TenTuyen
+            FROM tuyen_tram tt
+            JOIN tuyen_bus tb ON tb.MaTuyen = tt.MaTuyen
+            WHERE tt.MaTram = %s
+            GROUP BY tt.MaTuyen, tt.Chieu, tb.TenTuyen
+            ORDER BY tt.MaTuyen, tt.Chieu
+        """, [ma_tram])
+        rows = cursor.fetchall()
+
+    routes = [
+        {
+            "MaTuyen": r[0],
+            "Chieu": r[1],
+            "TenTuyen": r[2],
+        }
+        for r in rows
+    ]
+    return JsonResponse({"success": True, "routes": routes})

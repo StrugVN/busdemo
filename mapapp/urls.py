@@ -14,4 +14,5 @@ urlpatterns = [
     # NEW:
     path("shortest-path/", views.shortest_path_view, name="shortest_path"),
     path("update-route-info/", views.update_route_info_view, name="update_route_info"),
+    path("stop-routes/", views.stop_routes_view, name="stop_routes"),
 ]

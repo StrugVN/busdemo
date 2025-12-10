@@ -4,6 +4,78 @@ let bestPathIndex = null;        // data.best_index
 let selectedPathIndex = null;    // which path is shown in "Path:"
 let selectedOverlayPolylines = [];
 
+function normalizeVN(str) {
+    if (!str) return "";
+    return str
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "") // remove accents
+        .replace(/[^\w\s]/g, " ")        // remove punctuation
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function stripPlusCode(str) {
+    // Remove "XXXX+XX " style codes at the start
+    return str.replace(/^[a-z0-9]{4}\+[a-z0-9]{2}\s+/i, "").trim();
+}
+
+function getWardSearchText(address) {
+    // 1) remove plus code
+    let s = stripPlusCode(address);
+
+    // 2) split by comma
+    let parts = s.split(",").map(p => p.trim()).filter(Boolean);
+    if (!parts.length) return "";
+
+    // 3) drop trailing "Vietnam" / "Viet Nam"
+    while (parts.length) {
+        const lastNorm = normalizeVN(parts[parts.length - 1]);
+        if (lastNorm === "vietnam" || lastNorm === "viet nam") {
+            parts.pop();
+        } else {
+            break;
+        }
+    }
+
+    // 4) drop the remaining last part as province/city if we still have more than 1
+    //    e.g. "... , Soc Trang" → drop "Soc Trang"
+    if (parts.length > 1) {
+        parts.pop();
+    }
+
+    // remainder is things like:
+    // "Long Phu District" / "Vinh Chau" / "My Tu" / "Cai Rang, Can Tho"
+    return parts.join(", ");
+}
+
+function inferMaXaFromAddress(address) {
+    if (!address || !Array.isArray(XA_LIST)) return "";
+
+    const searchText = getWardSearchText(address);
+    const normSearch = normalizeVN(searchText);
+    if (!normSearch) return "";
+
+    let matchMaXa = "";
+
+    for (const xa of XA_LIST) {
+        if (!xa || !xa.TenXa) continue;
+
+        const full = normalizeVN(xa.TenXa);               // "phuong cai khe" / "xa long phu" / "xa soc trang"
+        const bare = full.replace(/^(xa|phuong|thi tran)\s+/, "");  // "cai khe" / "long phu" / "soc trang"
+
+        if (!bare) continue;
+
+        // Only look inside the *pre-trimmed* part (no province/country)
+        if (normSearch.includes(full) || normSearch.includes(bare)) {
+            matchMaXa = xa.MaXa;
+            break;
+        }
+    }
+
+    return matchMaXa;
+}
+
 function getMarkerForStop(maTram) {
     if (!maTram) return null;
     return stopMarkers.find(m => m.stopData && m.stopData.MaTram === maTram) || null;
@@ -153,18 +225,38 @@ function reverseGeocodeAndPrefill(latLng) {
 
         const address = results[0].formatted_address;
 
-        const diaChiInput = document.getElementById("diaChiInput");
-        const nameInput = document.getElementById("newStopName");
+        // For "add stop" dialog
+        const diaChiInputAdd = document.getElementById("diaChiInput");
+        const nameInputAdd = document.getElementById("newStopName");
 
-        if (diaChiInput && !diaChiInput.value) {
-            diaChiInput.value = address;
-        }
+        // For "edit stop" dialog
+        const diaChiInputEdit = document.getElementById("editAddress");
+        const nameInputEdit = document.getElementById("editName");
 
-        if (nameInput && !nameInput.value) {
-            nameInput.value = buildShortNameFromAddress(address);
+        // Fill address where empty
+        [diaChiInputAdd, diaChiInputEdit].forEach(input => {
+            if (input && !input.value) {
+                input.value = address;
+            }
+        });
+
+        // Optionally auto-name if name is empty
+        [nameInputAdd, nameInputEdit].forEach(input => {
+            if (input && !input.value) {
+                input.value = buildShortNameFromAddress(address);
+            }
+        });
+
+        const wardSelect = document.getElementById("newStopMaXa");
+        if (wardSelect && !wardSelect.value) {
+            const inferred = inferMaXaFromAddress(address);
+            if (inferred) {
+                wardSelect.value = inferred;
+            }
         }
     });
 }
+
 
 
 async function openAddStopPanel(fromStop = false) {
@@ -187,7 +279,7 @@ async function openAddStopPanel(fromStop = false) {
     routeStopsCache = pathStops;
 
     // 2) Dropdown for ALL stops in system (for "Use existing stop")
-    let existingOptions = `<option value="">-- New stop point --</option>`;
+    let existingOptions = `<option value="">-- Điểm dừng mới --</option>`;
     const allStopsSorted = STOPS.slice().sort((a, b) => {
         const na = (a.TenTram || a.MaTram || "").toLowerCase();
         const nb = (b.TenTram || b.MaTram || "").toLowerCase();
@@ -206,58 +298,70 @@ async function openAddStopPanel(fromStop = false) {
         pathStops.forEach((s, idx) => {
             const label = `${s.STT}. ${s.TenTram || s.MaTram}`;
             const selectedAttr = idx === pathStops.length - 1 ? " selected" : "";
-            positionOptions += `<option value="${s.STT}"${selectedAttr}>After "${label}"</option>`;
+            positionOptions += `<option value="${s.STT}"${selectedAttr}>Sau "${label}"</option>`;
         });
     } else {
-        positionOptions = `<option value="0" selected>After start</option>`;
+        positionOptions = `<option value="0" selected>Sau khi bắt đầu</option>`;
     }
 
     const lat = pendingStopLatLng.lat().toFixed(6);
     const lng = pendingStopLatLng.lng().toFixed(6);
 
+    const xaOptions = (XA_LIST || [])
+        .map(x => `<option value="${x.MaXa}">${x.TenXa}</option>`)
+        .join("");
+
+
     panel.innerHTML = `
     <div>
-      <b>Add stop</b><br/>
-      Route ${currentRouteMaTuyen} (${currentRouteChieu === "0" ? "Outbound" : "Inbound"})<br/>
+      <b>Thêm điểm dừng</b><br/>
+      Route ${currentRouteMaTuyen} (${currentRouteChieu === "0" ? "Chiều đi" : "Chiều về"})<br/>
       <small>Clicked at: ${lat}, ${lng}</small>
 
       <div style="margin-top:6px;">
-        <label style="font-size:12px;">Use existing stop:</label><br/>
+        <label style="font-size:12px;">Dùng điểm dừng có sẵn:</label><br/>
         <select id="existingStopSelect" style="width:100%;padding:3px 4px;">
           ${existingOptions}
         </select>
       </div>
 
       <div style="margin-top:6px;">
-        <label style="font-size:12px;">Insert position:</label><br/>
+        <label style="font-size:12px;">Vị trí:</label><br/>
         <select id="insertAfterSelect" style="width:100%;padding:3px 4px;">
           ${positionOptions}
         </select>
         <small style="font-size:11px;color:#555;">
-          New stop will be inserted after the selected stop.
+          Điểm dừng mới sẽ được thêm vào sau điểm dừng được chọn ở trên.
         </small>
       </div>
 
       <div id="newStopFields" style="margin-top:6px;">
-        <label style="font-size:12px;">New stop name:</label><br/>
+        <label style="font-size:12px;">Tên điểm dừng:</label><br/>
         <input id="newStopName" type="text" style="width:100%;padding:3px 4px;margin-bottom:4px;" />
 
-        <label style="font-size:12px;">Address (auto from Google):</label><br/>
+        <label style="font-size:12px;">Địa chỉ:</label><br/>
         <input id="diaChiInput" type="text"
-               style="width:100%;padding:3px 4px;margin-bottom:4px;"
-               placeholder="Fetching address..." />
+                style="width:100%;padding:3px 4px;margin-bottom:4px;"
+                placeholder="Fetching address..." />
 
-        <label style="font-size:12px;">Type:</label><br/>
+        <!-- NEW: Ward dropdown -->
+        <label style="font-size:12px;">Xã:</label><br/>
+        <select id="newStopMaXa" style="width:100%;padding:3px 4px;margin-bottom:4px;">
+            <option value="">-- Ward / Commune --</option>
+            ${xaOptions}
+        </select>
+
+        <label style="font-size:12px;">Loại:</label><br/>
         <select id="newStopType" style="width:100%;padding:3px 4px;">
-          <option value="1">Station</option>
-          <option value="2" selected>Stop</option>
+            <option value="1">Bến</option>
+            <option value="2" selected>Điểm dừng</option>
         </select>
       </div>
 
       <div style="margin-top:8px;text-align:right;">
         <button id="saveStopBtn" type="button"
                 style="background:#2196F3;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;">
-          Save stop
+          Lưu
         </button>
         <button id="cancelStopBtn" type="button"
                 style="background:#ccc;color:black;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;margin-left:6px;">
@@ -309,6 +413,8 @@ async function openAddStopPanel(fromStop = false) {
 
 
 async function saveStopFromPanel() {
+    let maXa = null;
+
     const panel = document.getElementById("addStopPanel");
     if (!pendingStopLatLng || !currentRouteMaTuyen) return;
 
@@ -323,6 +429,19 @@ async function saveStopFromPanel() {
         name = document.getElementById("newStopName").value.trim();
         type = document.getElementById("newStopType").value;
         diaChi = (document.getElementById("diaChiInput").value || "").trim();
+
+        const wardSelect = document.getElementById("newStopMaXa");
+        if (wardSelect) {
+            maXa = wardSelect.value || null;
+        }
+
+        // If ward still empty, try to infer again from DiaChi
+        if (!maXa && diaChi) {
+            const inferred = inferMaXaFromAddress(diaChi);
+            if (inferred) {
+                maXa = inferred;
+            }
+        }
 
         if (!name) {
             showMessage("Please enter a name for the new stop.", 3000);
@@ -341,6 +460,7 @@ async function saveStopFromPanel() {
         TenTram: name,                     // new stop only
         MaLoai: type,                      // new stop only
         DiaChi: diaChi,                    // new stop only
+        MaXa: maXa,                        // new stop only
         InsertAfterSTT: insertAfterSTT,    // route position
         // KhoangCachDenTramTiepTheo: NOT sent; backend computes it
     };
@@ -456,35 +576,47 @@ function createStopMarker(stop) {
             <div style="min-width:230px">
                 <b>${stop.TenTram || stop.MaTram}</b><br/>
                 Code: ${stop.MaTram}<br/>
-                Type: ${stop.MaLoai == 1 ? "Station" : "Stop"}<br/>
+                Type: ${stop.MaLoai == 1 ? "Bến" : "Điểm dừng"}<br/>
                 Address: ${stop.DiaChi || "N/A"}<br/>
                 Ward: ${stop.TenXa || "N/A"}<br/>
+
+                <div style="margin-top:6px;">
+                <b>Tuyến đi qua:</b>
+                <div id="stopRoutes_${stop.MaTram}"
+                    style="max-height:120px;overflow:auto;font-size:12px;">
+                    Loading...
+                </div>
+                </div>
 
                 ${pathButtonsHtml}
 
                 <div style="display:flex; gap:4px; margin-top:8px;">
-                  <button id="editStopBtn_${stop.MaTram}"
-                          style="flex:1; padding:4px 6px; border-radius:4px;
-                                  border:1px solid #ddd; background:#fafafa; cursor:pointer;">
+                <button id="editStopBtn_${stop.MaTram}"
+                        style="flex:1; padding:4px 6px; border-radius:4px;
+                                border:1px solid #ddd; background:#fafafa; cursor:pointer;">
                     Edit
-                  </button>
+                </button>
 
-                  ${removeButtonHtml}
+                ${removeButtonHtml}
 
-                  <button id="moveStopBtn_${stop.MaTram}"
-                          style="flex:1; padding:4px 6px; border-radius:4px;
-                                  border:1px solid #2196F3; background:#2196F3; color:white; cursor:pointer;">
+                <button id="moveStopBtn_${stop.MaTram}"
+                        style="flex:1; padding:4px 6px; border-radius:4px;
+                                border:1px solid #2196F3; background:#2196F3; color:white; cursor:pointer;">
                     Move
-                  </button>
+                </button>
                 </div>
             </div>
         `;
+
 
         info.setContent(content);
         info.open(map, marker);
 
         // IMPORTANT: use `info`, not `infoWindow`
         google.maps.event.addListenerOnce(info, "domready", () => {
+            if (typeof loadRoutesForStop === "function") {
+                loadRoutesForStop(stop.MaTram);
+            }
             const startBtn = document.getElementById(`setStartBtn_${stop.MaTram}`);
             const endBtn = document.getElementById(`setEndBtn_${stop.MaTram}`);
             const editBtn = document.getElementById(`editStopBtn_${stop.MaTram}`);
@@ -603,8 +735,16 @@ async function updateStopIconsForCurrentRoute() {
 function openEditStopDialog(stop, infoWindow) {
     const panel = document.getElementById("addStopPanel");
 
+    let selectedMaXa = stop.MaXa || "";
+    if ((!selectedMaXa || selectedMaXa === "0") && stop.DiaChi) {
+        const inferred = inferMaXaFromAddress(stop.DiaChi);
+        if (inferred) {
+            selectedMaXa = inferred;
+        }
+    }
+
     const xaOptions = XA_LIST
-        .map(x => `<option value="${x.MaXa}" ${stop.MaXa == x.MaXa ? "selected" : ""}>${x.TenXa}</option>`)
+        .map(x => `<option value="${x.MaXa}" ${selectedMaXa == x.MaXa ? "selected" : ""}>${x.TenXa}</option>`)
         .join("");
 
     panel.innerHTML = `
@@ -643,6 +783,14 @@ function openEditStopDialog(stop, infoWindow) {
     </div>
   `;
     panel.style.display = "block";
+
+    // If address is empty/null when editing, auto-fill from marker location
+    if (!stop.DiaChi || stop.DiaChi === "") {
+        if (typeof google !== "undefined" && stop.lat != null && stop.lng != null) {
+            const latLng = new google.maps.LatLng(stop.lat, stop.lng);
+            reverseGeocodeAndPrefill(latLng);
+        }
+    }
 
     document.getElementById("cancelEditStopBtn").onclick = () => {
         panel.style.display = "none";
@@ -1292,3 +1440,36 @@ function renderSelectedOverlay() {
     });
 }
 
+async function loadRoutesForStop(maTram) {
+    const container = document.getElementById(`stopRoutes_${maTram}`);
+    if (!container) return;
+
+    try {
+        const res = await fetch(`${STOP_ROUTES_URL}?MaTram=${encodeURIComponent(maTram)}`);
+        const data = await res.json();
+
+        if (!data.success) {
+            container.textContent = "(error loading routes)";
+            return;
+        }
+
+        const routes = data.routes || [];
+        if (!routes.length) {
+            container.textContent = "";
+            return;
+        }
+
+        let html = "<ul style='padding-left:16px;margin:4px 0;'>";
+        routes.forEach(r => {
+            const dirLabel = (r.Chieu === 0 || r.Chieu === "0") ? "Đi" : "Về";
+            const ten = r.TenTuyen ? ` - ${r.TenTuyen}` : "";
+            html += `<li>${r.MaTuyen} (${dirLabel})${ten}</li>`;
+        });
+        html += "</ul>";
+
+        container.innerHTML = html;
+    } catch (e) {
+        console.error(e);
+        container.textContent = "(error loading routes)";
+    }
+}
