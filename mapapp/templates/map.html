@@ -5,6 +5,7 @@
 <head>
   <meta charset="utf-8" />
   <title>Bus Routes Demo</title>
+  <link rel="stylesheet" href="{% static 'css/busmap.css' %}">
   <style>
     html,
     body {
@@ -66,14 +67,12 @@
     </select>
   </div>
 
-  <div id="routeStopsPanel"
-     style="position:absolute;top:56px;left:10px;width:260px;
+  <div id="routeStopsPanel" style="position:absolute;top:56px;left:10px;width:260px;
             max-height:300px;overflow:auto;
             background:#fff;border:1px solid #ccc;border-radius:4px;
             padding:8px;font-size:13px;z-index:998;
             box-shadow:0 2px 6px rgba(0,0,0,0.2);display:none;">
   </div>
-
 
   <div id="map"></div>
   <div id="messageBox"></div>
@@ -81,6 +80,16 @@
   <div id="addStopPanel" style="position:absolute;top:80px;right:10px;width:260px;
               background:#fff;border:1px solid #ccc;border-radius:4px;
               padding:8px;font-size:13px;z-index:999;display:none;box-shadow:0 2px 6px rgba(0,0,0,0.2);">
+  </div>
+
+  <div id="pathSelectionPanel">
+    <div><strong>Start:</strong> <span id="pathStartName">(none)</span></div>
+    <div><strong>End:</strong> <span id="pathEndName">(none)</span></div>
+
+    <div style="margin-top:4px;"><strong>Shortest path:</strong></div>
+    <div id="pathSummary" class="path-summary">(none)</div>
+
+    <button id="clearPathBtn" type="button">Clear</button>
   </div>
 
   <div id="dialogPanel" style="

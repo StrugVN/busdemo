@@ -8,8 +8,9 @@ urlpatterns = [
     path("update-stop-location/", views.update_stop_location, name="update_stop_location"),
     path("update-route-geometry/", views.update_route_geometry, name="update_route_geometry"),
     path("add-route-stop/", views.add_route_stop_view, name="add_route_stop"),
-
-    # these two are the important ones:
     path("delete-route-stop/", views.delete_route_stop_view, name="delete_route_stop"),
     path("update-stop-info/", views.update_stop_info_view, name="update_stop_info"),
+
+    # NEW:
+    path("shortest-path/", views.shortest_path_view, name="shortest_path"),
 ]

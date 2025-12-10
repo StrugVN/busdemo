@@ -98,7 +98,7 @@ function renderRouteStopsPanel(stops) {
                 map.setZoom(targetZoom);
             }
             map.panTo(pos);
-            
+
             if (currentlyOpenInfoWindow) {
                 currentlyOpenInfoWindow.close();
             }
@@ -396,6 +396,9 @@ function createStopMarker(stop) {
     });
 
     marker.stopData = stop;
+    if (typeof stopNameById !== "undefined") {
+        stopNameById[stop.MaTram] = stop.TenTram || stop.MaTram;
+    }
 
     const info = new google.maps.InfoWindow();
 
@@ -425,6 +428,20 @@ function createStopMarker(stop) {
         Address: ${stop.DiaChi || "N/A"}<br/>
         Ward: ${stop.TenXa || "N/A"}<br/>
 
+        <!-- NEW: Start / End selection -->
+        <div style="display:flex; gap:4px; margin-top:8px;">
+          <button id="setStartBtn_${stop.MaTram}"
+                  style="flex:1; padding:3px 5px; border-radius:4px;
+                         border:1px solid #4CAF50; background:#4CAF50; color:white; cursor:pointer;">
+            Start
+          </button>
+          <button id="setEndBtn_${stop.MaTram}"
+                  style="flex:1; padding:3px 5px; border-radius:4px;
+                         border:1px solid #FF9800; background:#FF9800; color:white; cursor:pointer;">
+            End
+          </button>
+        </div>
+
         <div style="display:flex; gap:4px; margin-top:8px;">
           <button id="editStopBtn_${stop.MaTram}"
                   style="flex:1; padding:4px 6px; border-radius:4px;
@@ -447,9 +464,18 @@ function createStopMarker(stop) {
         info.open(map, marker);
 
         google.maps.event.addListenerOnce(info, "domready", () => {
+            const startBtn = document.getElementById(`setStartBtn_${stop.MaTram}`);
+            const endBtn = document.getElementById(`setEndBtn_${stop.MaTram}`);
             const editBtn = document.getElementById(`editStopBtn_${stop.MaTram}`);
             const deleteBtn = document.getElementById(`deleteStopBtn_${stop.MaTram}`);
             const moveBtn = document.getElementById(`moveStopBtn_${stop.MaTram}`);
+
+            if (startBtn) {
+                startBtn.onclick = () => handleSetAsStart(stop, marker);
+            }
+            if (endBtn) {
+                endBtn.onclick = () => handleSetAsEnd(stop, marker);
+            }
 
             if (moveBtn) {
                 moveBtn.onclick = () => {
@@ -461,7 +487,7 @@ function createStopMarker(stop) {
 
             if (editBtn) {
                 editBtn.onclick = () => {
-                    openEditStopDialog(marker.stopData, info); // pass info window too
+                    openEditStopDialog(marker.stopData, info);
                 };
             }
 
@@ -471,6 +497,7 @@ function createStopMarker(stop) {
                 };
             }
         });
+
     });
 
     // Right-click on a stop to add it into the current route at some position
@@ -693,4 +720,177 @@ function openDeleteStopConfirm(stop, infoWindow) {
         updateStopIconsForCurrentRoute();
     };
 }
+
+function clearCurrentPath() {
+    currentPathPolylines.forEach(line => line.setMap(null));
+    currentPathPolylines = [];
+}
+
+function onStopMarkerClick(stop, marker) {
+    // Existing behavior: show info window, etc...
+    showStopInfo(stop, marker);  // whatever you currently do
+
+    // New behavior: select start/end for path finding
+    if (!pathStartStopId) {
+        // 1st click → start stop
+        pathStartStopId = stop.MaTram;
+        pathStartMarker = marker;
+        clearCurrentPath();
+        highlightMarker(marker, "start");  // e.g. change color/icon
+
+    } else if (!pathEndStopId && stop.MaTram !== pathStartStopId) {
+        // 2nd click → end stop
+        pathEndStopId = stop.MaTram;
+        pathEndMarker = marker;
+        highlightMarker(marker, "end");
+
+        requestShortestPath(pathStartStopId, pathEndStopId);
+
+    } else {
+        // 3rd click → reset and treat as new start
+        resetPathSelection();
+        pathStartStopId = stop.MaTram;
+        pathStartMarker = marker;
+        highlightMarker(marker, "start");
+    }
+}
+
+async function requestShortestPath(startMaTram, endMaTram) {
+    if (!startMaTram || !endMaTram) return;
+
+    try {
+        const url = `/shortest-path/?start=${encodeURIComponent(startMaTram)}&end=${encodeURIComponent(endMaTram)}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+            console.error("shortest-path error:", await res.text());
+            showMessage("No path found.", 4000);
+            return;
+        }
+        const data = await res.json();
+        if (!data.success) {
+            showMessage(data.error || "No path found.", 4000);
+            return;
+        }
+        renderPathsOnMap(data);
+    } catch (err) {
+        console.error("Error fetching shortest path", err);
+        showMessage("Error fetching shortest path.", 4000);
+    }
+}
+
+function renderPathsOnMap(data) {
+    clearCurrentPathLines();
+
+    if (typeof clearAllRoutesPolylines === "function") {
+        clearAllRoutesPolylines();
+    }
+
+    if (!data || !Array.isArray(data.paths) || data.paths.length === 0) {
+        updatePathPanel(null);
+        return;
+    }
+
+    const bestIndex = data.best_index || 0;
+    const bestPath = data.paths[bestIndex];
+    const bounds = new google.maps.LatLngBounds();
+
+    // 1) Draw all non-best paths as faint dashed lines (optional)
+    data.paths.forEach((path, idx) => {
+        if (idx === bestIndex) return;
+
+        const gPath = path.polyline.map(
+            p => new google.maps.LatLng(p.lat, p.lng)
+        );
+
+        const lineOptions = {
+            path: gPath,
+            map: map,
+            strokeColor: "#999999",
+            strokeOpacity: 0.6,
+            strokeWeight: 3,
+            icons: [{
+                icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 },
+                offset: "0",
+                repeat: "12px",
+            }],
+        };
+
+        const polyline = new google.maps.Polyline(lineOptions);
+        currentPathPolylines.push(polyline);
+        gPath.forEach(ll => bounds.extend(ll));
+    });
+
+    // 2) Draw BEST path with per-subpath color + arrows
+    const segs = bestPath.segments || [];
+    const colorPalette = [
+        "#e41a1c", "#377eb8", "#4daf4a", "#984ea3",
+        "#ff7f00", "#a65628", "#f781bf", "#999999",
+    ];
+
+    segs.forEach((seg, idx) => {
+        const gSegPath = seg.coords.map(
+            p => new google.maps.LatLng(p.lat, p.lng)
+        );
+        const color = colorPalette[idx % colorPalette.length];
+
+        const lineOptions = {
+            path: gSegPath,
+            map: map,
+            strokeColor: color,
+            strokeOpacity: 0.95,
+            strokeWeight: 5,
+            icons: [{
+                icon: {
+                    path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                    scale: 3,
+                },
+                offset: "20px",
+                repeat: "80px",
+            }],
+        };
+
+        const polyline = new google.maps.Polyline(lineOptions);
+        currentPathPolylines.push(polyline);
+        gSegPath.forEach(ll => bounds.extend(ll));
+    });
+
+    if (!bounds.isEmpty()) {
+        map.fitBounds(bounds);
+    }
+
+    // 3) Update the dialog (Start/End + shortest path list)
+    updatePathPanel(bestPath);
+}
+
+
+
+function maybeCallShortestPath() {
+    if (!pathStartStopId || !pathEndStopId) return;
+    if (pathStartStopId === pathEndStopId) {
+        showMessage("Start and end are the same stop.", 3000);
+        return;
+    }
+    requestShortestPath(pathStartStopId, pathEndStopId);
+}
+
+function handleSetAsStart(stop, marker) {
+    pathStartStopId = stop.MaTram;
+    pathStartMarker = marker;
+    updatePathPanel();
+
+    if (pathEndStopId && pathEndStopId !== pathStartStopId) {
+        requestShortestPath(pathStartStopId, pathEndStopId);
+    }
+}
+
+function handleSetAsEnd(stop, marker) {
+    pathEndStopId = stop.MaTram;
+    pathEndMarker = marker;
+    updatePathPanel();
+
+    if (pathStartStopId && pathEndStopId !== pathStartStopId) {
+        requestShortestPath(pathStartStopId, pathEndStopId);
+    }
+}
+
 

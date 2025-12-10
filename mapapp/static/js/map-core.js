@@ -38,6 +38,16 @@ let geocoder;  // for reverse geocoding
 let currentRouteStopIds = new Set();  // MaTram currently on selected route+direction
 
 
+let pathStartStopId = null;
+let pathEndStopId = null;
+
+let pathStartMarker = null;
+let pathEndMarker = null;
+
+let currentPathPolylines = [];  // google.maps.Polyline[]
+let stopNameById = {};
+
+
 //
 // TYPE 2 (Điểm dừng)  — triangles
 //
@@ -109,6 +119,31 @@ function showMessage(text, timeout = 3000) {
     box.style.display = "none";
   }, timeout);
 }
+
+
+function clearCurrentPathLines() {
+  currentPathPolylines.forEach(pl => pl.setMap(null));
+  currentPathPolylines = [];
+}
+
+function updatePathStatusPanel() {
+  const startLabel = document.getElementById("pathStartLabel");
+  const endLabel = document.getElementById("pathEndLabel");
+  if (!startLabel || !endLabel) return;
+
+  startLabel.textContent = "Start: " + (pathStartStopId || "(none)");
+  endLabel.textContent = "End: " + (pathEndStopId || "(none)");
+}
+
+function resetPathSelection() {
+  pathStartStopId = null;
+  pathEndStopId = null;
+  pathStartMarker = null;
+  pathEndMarker = null;
+  clearCurrentPathLines();
+  updatePathPanel(null);
+}
+
 
 // initMap – full logic: overlay, markers, click handlers
 function initMap() {
@@ -194,4 +229,139 @@ function initMap() {
     pendingStopLatLng = event.latLng;
     await openAddStopPanel();  // defined in map-stops.js
   });
+}
+
+function buildPathSummary(path) {
+  if (!path || !Array.isArray(path.stops) || path.stops.length === 0) {
+    return "(none)";
+  }
+
+  const stops = path.stops;
+  const edges = path.edges || [];
+
+  if (stops.length === 1 || edges.length === 0) {
+    return stops[0].TenTram || stops[0].MaTram;
+  }
+
+  // We want:
+  // StartName, [last stop of each bus run] (bus XXX), ...
+  const parts = [];
+  const startName = stops[0].TenTram || stops[0].MaTram;
+  parts.push(startName);
+
+  let runRoute = edges[0].MaTuyen;
+  let runStartIdx = 0;
+
+  function pushRun(endEdgeIdx) {
+    const stopIdx = endEdgeIdx + 1;      // edge i ends at node i+1
+    const st = stops[stopIdx];
+    const name = st.TenTram || st.MaTram;
+    parts.push(`${name} (bus ${runRoute})`);
+  }
+
+  for (let i = 1; i < edges.length; i++) {
+    if (edges[i].MaTuyen !== runRoute) {
+      // close previous run at i-1
+      pushRun(i - 1);
+      runRoute = edges[i].MaTuyen;
+      runStartIdx = i;
+    }
+  }
+
+  // close last run (to final stop)
+  pushRun(edges.length - 1);
+
+  return parts.join(", ");
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function formatDistance(meters) {
+  if (!meters || meters <= 0) return "0 m";
+  if (meters >= 1000) {
+    return (meters / 1000).toFixed(1) + " km";
+  }
+  return Math.round(meters) + " m";
+}
+
+function buildPathSummaryHtml(path) {
+  if (!path || !Array.isArray(path.segments) || path.segments.length === 0)
+    return "(none)";
+
+  const segs = path.segments;
+  const stops = path.stops || [];
+
+  const stopNameByIdLocal = {};
+  stops.forEach(s => {
+    stopNameByIdLocal[s.MaTram] = s.TenTram || s.MaTram;
+  });
+
+  let html = "";
+
+  // First stop
+  const firstStop = stopNameByIdLocal[segs[0].from] || segs[0].from;
+  html += `<div class="path-step-stop">${escapeHtml(firstStop)}</div>`;
+
+  // Segments
+  segs.forEach(seg => {
+    const routeInfo = ROUTE_INFO[seg.MaTuyen];
+    const routeName = routeInfo ? (routeInfo.TenTuyen || seg.MaTuyen) : seg.MaTuyen;
+
+    const dirText =
+      seg.Chieu === 0 || seg.Chieu === "0" ? "Chiều đi" : "Chiều về";
+
+    const distText = formatDistance(seg.distance);
+    const toStopName = stopNameByIdLocal[seg.to] || seg.to;
+
+    html += `
+      <div class="path-step-row">
+        <div class="path-step-arrow">↓</div>
+        <div class="path-step-route">
+          ${escapeHtml(routeName)} - ${escapeHtml(dirText)} - ${escapeHtml(distText)}
+        </div>
+      </div>
+
+      <div class="path-step-stop">${escapeHtml(toStopName)}</div>
+    `;
+
+  });
+
+  return html;
+}
+
+
+function updatePathPanel(bestPath = null) {
+  const startEl = document.getElementById("pathStartName");
+  const endEl = document.getElementById("pathEndName");
+  const summaryEl = document.getElementById("pathSummary");
+
+  if (startEl) {
+    const startName =
+      pathStartStopId && stopNameById[pathStartStopId]
+        ? stopNameById[pathStartStopId]
+        : (pathStartStopId || "(none)");
+    startEl.textContent = startName;
+  }
+
+  if (endEl) {
+    const endName =
+      pathEndStopId && stopNameById[pathEndStopId]
+        ? stopNameById[pathEndStopId]
+        : (pathEndStopId || "(none)");
+    endEl.textContent = endName;
+  }
+
+  if (summaryEl) {
+    if (bestPath) {
+      summaryEl.innerHTML = buildPathSummaryHtml(bestPath);
+    } else {
+      summaryEl.textContent = "(none)";
+    }
+  }
 }

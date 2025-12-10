@@ -7,6 +7,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 import math
 from .models import TuyenBus, TramDung
+from collections import defaultdict
+import heapq
 
 
 def wkt_to_latlng_list(wkt: str):
@@ -583,3 +585,413 @@ def update_stop_info_view(request):
         )
 
     return JsonResponse({"success": True})
+
+def shortest_path_view(request):
+    """
+    GET /shortest-path/?start=MaTramStart&end=MaTramEnd
+
+    Response:
+    {
+      "success": true,
+      "paths": [
+        {
+          "total_distance": ...,
+          "nodes": [...],
+          "stops": [ {MaTram, TenTram, lat, lng, MaLoai}, ... ],
+          "edges": [
+            {
+              "from": "...",
+              "to": "...",
+              "MaTuyen": "...",
+              "Chieu": 0 or 1,
+              "from_STT": ...,
+              "to_STT": ...,
+              "distance": ...
+            },
+            ...
+          ],
+          "polyline": [ {lat, lng}, ... ],          # full geometry
+          "segments": [                             # grouped by route+direction
+            {
+              "MaTuyen": "01",
+              "Chieu": 0,
+              "from": "STOP_A",
+              "to": "STOP_B",
+              "distance": 1234.5,                  # sum of KhoangCach in this subpath
+              "coords": [ {lat, lng}, ... ]        # geometry just for this subpath
+            },
+            ...
+          ]
+        }
+      ],
+      "best_index": 0
+    }
+    """
+
+    start = request.GET.get("start")
+    end = request.GET.get("end")
+
+    if not start or not end:
+        return JsonResponse(
+            {"success": False, "error": "start and end are required"},
+            status=400,
+        )
+
+    # ---------- Helpers ----------
+
+    # If you already have haversine_meters defined globally, you can remove this one
+    def haversine_meters(lon1, lat1, lon2, lat2):
+        R = 6371000.0
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlambda = math.radians(lon2 - lon1)
+        a = (
+            math.sin(dphi / 2) ** 2
+            + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+        )
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return R * c
+
+    def build_route_graph():
+        """
+        Build directed graph from tuyen_tram.
+
+        Node: MaTram
+        Edge: MaTram(i) -> MaTram(i+1) for each (MaTuyen, Chieu),
+              weight = KhoangCachDenTramTiepTheo (meters) or haversine fallback.
+
+        Returns:
+          graph:  {MaTram: [edge, ...]}
+          node_info: {MaTram: {...}}
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    tt.MaTuyen,
+                    tt.Chieu,
+                    tt.STT,
+                    tt.MaTram,
+                    tt.KhoangCachDenTramTiepTheo,
+                    d.TenTram,
+                    d.ViDo,
+                    d.KinhDo,
+                    d.MaLoai
+                FROM tuyen_tram tt
+                JOIN tram_dung d ON tt.MaTram = d.MaTram
+                ORDER BY tt.MaTuyen, tt.Chieu, tt.STT
+                """
+            )
+            rows = cursor.fetchall()
+
+        routes = defaultdict(list)
+        for (
+            ma_tuyen,
+            chieu,
+            stt,
+            ma_tram,
+            kc_next,
+            ten_tram,
+            lat,
+            lng,
+            ma_loai,
+        ) in rows:
+            routes[(ma_tuyen, chieu)].append(
+                {
+                    "MaTuyen": ma_tuyen,
+                    "Chieu": int(chieu),
+                    "STT": stt,
+                    "MaTram": ma_tram,
+                    "KhoangCachDenTramTiepTheo": kc_next,
+                    "TenTram": ten_tram,
+                    "lat": float(lat),
+                    "lng": float(lng),
+                    "MaLoai": ma_loai,
+                }
+            )
+
+        graph = defaultdict(list)
+        node_info = {}
+
+        for _, stop_list in routes.items():
+            stop_list.sort(key=lambda s: s["STT"])
+
+            for s in stop_list:
+                if s["MaTram"] not in node_info:
+                    node_info[s["MaTram"]] = {
+                        "MaTram": s["MaTram"],
+                        "TenTram": s["TenTram"],
+                        "lat": s["lat"],
+                        "lng": s["lng"],
+                        "MaLoai": s["MaLoai"],
+                    }
+
+            for i in range(len(stop_list) - 1):
+                a = stop_list[i]
+                b = stop_list[i + 1]
+
+                weight = a["KhoangCachDenTramTiepTheo"]
+                if weight is None:
+                    weight = haversine_meters(
+                        a["lng"],
+                        a["lat"],
+                        b["lng"],
+                        b["lat"],
+                    )
+
+                edge = {
+                    "from": a["MaTram"],
+                    "to": b["MaTram"],
+                    "weight": float(weight),
+                    "MaTuyen": a["MaTuyen"],
+                    "Chieu": a["Chieu"],
+                    "from_STT": a["STT"],
+                    "to_STT": b["STT"],
+                }
+                graph[a["MaTram"]].append(edge)
+
+        return graph, node_info
+
+    def dijkstra_shortest_path(graph, start_node, end_node):
+        """Return {total_distance, nodes, edges} or None."""
+        if start_node == end_node:
+            return {"total_distance": 0.0, "nodes": [start_node], "edges": []}
+
+        dist = {start_node: 0.0}
+        prev = {}
+        prev_edge = {}
+        heap = [(0.0, start_node)]
+
+        while heap:
+            d, u = heapq.heappop(heap)
+            if u == end_node:
+                break
+            if d > dist.get(u, float("inf")):
+                continue
+
+            for edge in graph.get(u, []):
+                v = edge["to"]
+                nd = d + edge["weight"]
+                if nd < dist.get(v, float("inf")):
+                    dist[v] = nd
+                    prev[v] = u
+                    prev_edge[v] = edge
+                    heapq.heappush(heap, (nd, v))
+
+        if end_node not in dist:
+            return None
+
+        nodes = []
+        edges = []
+        cur = end_node
+        while cur != start_node:
+            nodes.append(cur)
+            edges.append(prev_edge[cur])
+            cur = prev[cur]
+        nodes.append(start_node)
+        nodes.reverse()
+        edges.reverse()
+
+        return {"total_distance": dist[end_node], "nodes": nodes, "edges": edges}
+
+    def load_route_geometry(ma_tuyen, chieu):
+        """
+        Load full geometry for route+direction as list[{lat,lng}],
+        using Path (chieu=0) or Path_Nguoc (chieu=1).
+        """
+        field = "Path" if chieu == 0 else "Path_Nguoc"
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT AsText({field}) FROM tuyen_bus WHERE MaTuyen = %s",
+                [ma_tuyen],
+            )
+            row = cursor.fetchone()
+        if not row or row[0] is None:
+            return []
+        # existing helper in your file
+        return wkt_to_latlng_list(row[0])
+
+    def closest_index_on_path(path_coords, lat, lng):
+        """Index of vertex in path_coords closest to (lat, lng)."""
+        best_idx = 0
+        best_d2 = float("inf")
+        for i, p in enumerate(path_coords):
+            dx = p["lng"] - lng
+            dy = p["lat"] - lat
+            d2 = dx * dx + dy * dy
+            if d2 < best_d2:
+                best_d2 = d2
+                best_idx = i
+        return best_idx
+
+    # ---------- Build graph & run Dijkstra ----------
+
+    graph, node_info = build_route_graph()
+
+    if start not in node_info:
+        return JsonResponse(
+            {"success": False, "error": f"Unknown start stop: {start}"},
+            status=404,
+        )
+    if end not in node_info:
+        return JsonResponse(
+            {"success": False, "error": f"Unknown end stop: {end}"},
+            status=404,
+        )
+
+    best = dijkstra_shortest_path(graph, start, end)
+    if best is None:
+        return JsonResponse(
+            {"success": False, "error": "No path found"},
+            status=404,
+        )
+
+    nodes = best["nodes"]
+    edges = best["edges"]
+    stops = [node_info[ma_tram] for ma_tram in nodes]
+
+    # ---------- Build geometry + segments grouped by (MaTuyen, Chieu) ----------
+
+    route_geom_cache = {}  # (MaTuyen, Chieu) -> list[{lat,lng}]
+
+    def get_geom(ma_tuyen, chieu):
+        key = (ma_tuyen, chieu)
+        if key not in route_geom_cache:
+            route_geom_cache[key] = load_route_geometry(ma_tuyen, chieu)
+        return route_geom_cache[key]
+
+    combined_polyline = []
+    segments = []
+    current_segment = None
+
+    for edge in edges:
+        ma_tuyen = edge["MaTuyen"]
+        chieu = edge["Chieu"]
+        from_id = edge["from"]
+        to_id = edge["to"]
+
+        geom = get_geom(ma_tuyen, chieu)
+        if not geom:
+            # fallback: straight line between stops
+            a = node_info[from_id]
+            b = node_info[to_id]
+            seg_coords = [
+                {"lat": a["lat"], "lng": a["lng"]},
+                {"lat": b["lat"], "lng": b["lng"]},
+            ]
+        else:
+            a = node_info[from_id]
+            b = node_info[to_id]
+            i_start = closest_index_on_path(geom, a["lat"], a["lng"])
+            i_end = closest_index_on_path(geom, b["lat"], b["lng"])
+
+            if i_start <= i_end:
+                seg_coords = geom[i_start : i_end + 1]
+            else:
+                seg_coords = list(reversed(geom[i_end : i_start + 1]))
+
+        # grow full combined polyline
+        if not combined_polyline:
+            combined_polyline.extend(seg_coords)
+        else:
+            combined_polyline.extend(seg_coords[1:])
+
+        # group into route+direction segments
+        if (
+            current_segment is None
+            or current_segment["MaTuyen"] != ma_tuyen
+            or current_segment["Chieu"] != chieu
+        ):
+            # close previous
+            if current_segment is not None:
+                segments.append(current_segment)
+            current_segment = {
+                "MaTuyen": ma_tuyen,
+                "Chieu": chieu,
+                "from": from_id,
+                "to": to_id,
+                "distance": edge["weight"],  # start new sum
+                "coords": seg_coords[:],
+            }
+        else:
+            # extend existing segment (same route & direction)
+            current_segment["to"] = to_id
+            current_segment["distance"] += edge["weight"]
+            current_segment["coords"].extend(seg_coords[1:])
+
+    if current_segment is not None:
+        segments.append(current_segment)
+
+    # ---------- Normalize edges for JSON ----------
+
+    edges_json = []
+    for e in edges:
+        edges_json.append(
+            {
+                "from": e["from"],
+                "to": e["to"],
+                "MaTuyen": e["MaTuyen"],
+                "Chieu": e["Chieu"],
+                "from_STT": e["from_STT"],
+                "to_STT": e["to_STT"],
+                "distance": e["weight"],
+            }
+        )
+
+    path_payload = {
+        "total_distance": best["total_distance"],
+        "nodes": nodes,
+        "stops": stops,
+        "edges": edges_json,
+        "polyline": combined_polyline,
+        "segments": segments,
+    }
+
+    return JsonResponse(
+        {
+            "success": True,
+            "paths": [path_payload],
+            "best_index": 0,
+        }
+    )
+
+def enumerate_bounded_paths(graph, start, end, best_distance, max_factor=1.5, max_paths=10):
+    if best_distance <= 0:
+        return []
+
+    dist_limit = best_distance * max_factor
+    paths = []
+    visited = set()
+
+    def dfs(node, dist_so_far, nodes, edges):
+        if len(paths) >= max_paths:
+            return
+        if dist_so_far > dist_limit:
+            return
+        if node == end and len(nodes) > 1:
+            paths.append({
+                "total_distance": dist_so_far,
+                "nodes": list(nodes),
+                "edges": list(edges),
+            })
+            return
+
+        for edge in graph.get(node, []):
+            v = edge["to"]
+            if v in nodes:  # avoid cycles
+                continue
+            nd = dist_so_far + edge["weight"]
+            if nd > dist_limit:
+                continue
+            nodes.append(v)
+            edges.append(edge)
+            dfs(v, nd, nodes, edges)
+            edges.pop()
+            nodes.pop()
+
+    dfs(start, 0.0, [start], [])
+
+    # sort by distance and clip
+    paths.sort(key=lambda p: p["total_distance"])
+    return paths[:max_paths]
