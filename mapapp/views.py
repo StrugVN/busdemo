@@ -784,6 +784,8 @@ def shortest_path_view(request):
 
     # ---------- Build graph & enumerate all simple paths ----------
 
+        # ---------- Build graph ----------
+
     graph, node_info = build_route_graph()
 
     if start not in node_info:
@@ -797,16 +799,54 @@ def shortest_path_view(request):
             status=404,
         )
 
-    raw_paths = enumerate_all_paths(graph, start, end)
-    if not raw_paths:
+    # ---------- 1) Find the absolute shortest path (Dijkstra) ----------
+
+    best_dist, best_nodes, best_edges = dijkstra_shortest_path(graph, start, end)
+    if not best_nodes:
         return JsonResponse(
             {"success": False, "error": "No path found"},
             status=404,
         )
 
-    # sort by total distance and pick index 0 as "shortest"
-    raw_paths.sort(key=lambda p: p["total_distance"])
+    best_path_struct = {
+        "total_distance": best_dist,
+        "nodes": best_nodes,
+        "edges": best_edges,
+    }
+
+    # ---------- 2) Enumerate near-optimal paths ----------
+
+    # e.g. all paths <= 1.5x shortest, up to 2000 raw paths
+    raw_alt_paths = enumerate_bounded_paths(
+        graph,
+        start,
+        end,
+        best_distance=best_dist,
+        max_factor=50,
+        max_paths=50000,
+    )
+
+    # Ensure the true best path is included in the set
+    all_candidate_paths = [best_path_struct]
+    # Avoid duplicate if enumerate_bounded_paths already discovered this exact path
+    for p in raw_alt_paths:
+        if p["total_distance"] == best_dist and p["nodes"] == best_nodes:
+            continue
+        all_candidate_paths.append(p)
+
+    # ---------- 3) Diversity filter: keep only sufficiently different paths ----------
+
+    diverse_paths = filter_similar_paths(
+        all_candidate_paths,
+        max_keep=30,           # tweak: how many distinct paths you want
+        similarity_threshold=0.7,  # lower = more different
+    )
+
+    # After filtering, recompute best_index (shortest in the kept set)
+    diverse_paths.sort(key=lambda p: p["total_distance"])
+    raw_paths = diverse_paths
     best_index = 0
+
 
     # ---------- Build geometry & payload for each path ----------
 
@@ -918,13 +958,12 @@ def shortest_path_view(request):
     )
 
 
-def enumerate_bounded_paths(graph, start, end, best_distance, max_factor=1.5, max_paths=10):
+def enumerate_bounded_paths(graph, start, end, best_distance, max_factor=1.5, max_paths=2000):
     if best_distance <= 0:
         return []
 
     dist_limit = best_distance * max_factor
     paths = []
-    visited = set()
 
     def dfs(node, dist_so_far, nodes, edges):
         if len(paths) >= max_paths:
@@ -954,7 +993,6 @@ def enumerate_bounded_paths(graph, start, end, best_distance, max_factor=1.5, ma
 
     dfs(start, 0.0, [start], [])
 
-    # sort by distance and clip
     paths.sort(key=lambda p: p["total_distance"])
     return paths[:max_paths]
 
@@ -1084,3 +1122,103 @@ def new_route_view(request):
         return JsonResponse({"success": False, "error": str(e)}, status=400)
 
     return JsonResponse({"success": True})
+
+def dijkstra_shortest_path(graph, start, end):
+    """
+    Standard Dijkstra for weighted directed graph.
+    graph: {u: [edge, ...]} where edge has ["to", "weight", ...]
+    Returns: (dist, nodes, edges) or (float("inf"), [], []) if no path.
+    """
+    dist = defaultdict(lambda: float("inf"))
+    dist[start] = 0.0
+    prev_node = {}
+    prev_edge = {}
+
+    heap = [(0.0, start)]
+
+    while heap:
+        d, u = heapq.heappop(heap)
+        if d > dist[u]:
+            continue
+        if u == end:
+            break
+
+        for edge in graph.get(u, []):
+            v = edge["to"]
+            nd = d + edge["weight"]
+            if nd < dist[v]:
+                dist[v] = nd
+                prev_node[v] = u
+                prev_edge[v] = edge
+                heapq.heappush(heap, (nd, v))
+
+    if end not in dist or dist[end] == float("inf"):
+        return float("inf"), [], []
+
+    # Reconstruct path
+    nodes = [end]
+    edges = []
+    cur = end
+    while cur != start:
+        e = prev_edge[cur]
+        edges.append(e)
+        cur = prev_node[cur]
+        nodes.append(cur)
+
+    nodes.reverse()
+    edges.reverse()
+    return dist[end], nodes, edges
+
+
+def edge_set(path):
+    """Convert a path (nodes + edges) to a frozenset of (from, to) pairs."""
+    es = []
+    nodes = path["nodes"]
+    for i, e in enumerate(path["edges"]):
+        u = nodes[i]
+        v = e["to"]
+        es.append((u, v))
+    return frozenset(es)
+
+
+def jaccard(a, b):
+    if not a and not b:
+        return 1.0
+    inter = len(a & b)
+    union = len(a | b)
+    return inter / union if union else 0.0
+
+
+def filter_similar_paths(paths, max_keep=30, similarity_threshold=0.7):
+    """
+    Keep at most max_keep paths that are not too similar.
+    Similarity measured as Jaccard on edge sets (from,to).
+    """
+    if not paths:
+        return []
+
+    # Shortest first
+    paths = sorted(paths, key=lambda p: p["total_distance"])
+    kept = []
+    kept_sets = []
+
+    for p in paths:
+        es = edge_set(p)
+        if es is None:
+            continue
+
+        too_similar = False
+        for ks in kept_sets:
+            if jaccard(es, ks) >= similarity_threshold:
+                too_similar = True
+                break
+
+        if too_similar:
+            continue
+
+        kept.append(p)
+        kept_sets.append(es)
+        if len(kept) >= max_keep:
+            break
+
+    return kept
