@@ -336,32 +336,24 @@ function buildPathSummaryHtml(path) {
 }
 
 
-function updatePathPanel(bestPath = null) {
+function updatePathPanel(path = null) {
   const startEl = document.getElementById("pathStartName");
   const endEl = document.getElementById("pathEndName");
   const summaryEl = document.getElementById("pathSummary");
 
   if (startEl) {
-    const startName =
-      pathStartStopId && stopNameById[pathStartStopId]
-        ? stopNameById[pathStartStopId]
-        : (pathStartStopId || "(none)");
-    startEl.textContent = startName;
+    startEl.textContent =
+      stopNameById[pathStartStopId] || pathStartStopId || "(none)";
   }
 
   if (endEl) {
-    const endName =
-      pathEndStopId && stopNameById[pathEndStopId]
-        ? stopNameById[pathEndStopId]
-        : (pathEndStopId || "(none)");
-    endEl.textContent = endName;
+    endEl.textContent =
+      stopNameById[pathEndStopId] || pathEndStopId || "(none)";
   }
 
   if (summaryEl) {
-    if (bestPath) {
-      summaryEl.innerHTML = buildPathSummaryHtml(bestPath);
-    } else {
-      summaryEl.textContent = "(none)";
-    }
+    if (path) summaryEl.innerHTML = buildPathSummaryHtml(path);  // you already have this
+    else summaryEl.textContent = "(none)";
   }
 }
+

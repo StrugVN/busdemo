@@ -193,3 +193,37 @@ select {
   white-space: nowrap;
 }
 
+/* Container for list of all paths */
+#pathSelectionPanel .path-list {
+  margin-top: 2px;
+  max-height: 130px;
+  overflow-y: auto;
+  font-size: 11px;
+}
+
+/* One row in the path list */
+.path-list-item {
+  padding: 2px 4px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-radius: 3px;
+}
+
+/* Left side: index */
+.path-list-index {
+  color: #555;
+  margin-right: 6px;
+}
+
+/* Right side: distance text */
+.path-list-distance {
+  color: #333;
+}
+
+/* Selected path highlight */
+.path-list-item.selected {
+  background: #e3f2fd;
+  font-weight: 500;
+}

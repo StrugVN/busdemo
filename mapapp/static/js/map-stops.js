@@ -1,4 +1,7 @@
 let currentlyOpenInfoWindow = null;
+let pathResultData = null;       // full response from /shortest-path
+let bestPathIndex = null;        // data.best_index
+let selectedPathIndex = null;    // which path is shown in "Path:"
 
 
 function getMarkerForStop(maTram) {
@@ -762,7 +765,6 @@ async function requestShortestPath(startMaTram, endMaTram) {
         const url = `/shortest-path/?start=${encodeURIComponent(startMaTram)}&end=${encodeURIComponent(endMaTram)}`;
         const res = await fetch(url);
         if (!res.ok) {
-            console.error("shortest-path error:", await res.text());
             showMessage("No path found.", 4000);
             return;
         }
@@ -771,12 +773,20 @@ async function requestShortestPath(startMaTram, endMaTram) {
             showMessage(data.error || "No path found.", 4000);
             return;
         }
-        renderPathsOnMap(data);
+
+        pathResultData = data;
+        bestPathIndex = data.best_index || 0;
+        selectedPathIndex = bestPathIndex;   // default: shortest path selected
+
+        renderAllPaths();                    // new renderer (section 5)
+        updatePathPanel(getSelectedPath());  // selected path summary
+        updatePathList();                    // list of all paths
     } catch (err) {
         console.error("Error fetching shortest path", err);
         showMessage("Error fetching shortest path.", 4000);
     }
 }
+
 
 function renderPathsOnMap(data) {
     clearCurrentPathLines();
@@ -955,4 +965,239 @@ function handleSetAsEnd(stop, marker) {
 
 function edgeKey(edge) {
     return edge.from + "->" + edge.to;
+}
+
+function getSelectedPath() {
+  if (!pathResultData || !Array.isArray(pathResultData.paths)) return null;
+  if (selectedPathIndex == null) return null;
+  return pathResultData.paths[selectedPathIndex] || null;
+}
+
+function renderAllPaths() {
+  clearCurrentPathLines();
+  if (typeof clearAllRoutesPolylines === "function") {
+    clearAllRoutesPolylines();
+  }
+
+  if (!pathResultData || !Array.isArray(pathResultData.paths) || pathResultData.paths.length === 0) {
+    updatePathPanel(null);
+    return;
+  }
+
+  const paths = pathResultData.paths;
+  const bestIdx = bestPathIndex ?? 0;
+  const selIdx = selectedPathIndex ?? bestIdx;
+  const bounds = new google.maps.LatLngBounds();
+
+  const drawnEdges = new Set();
+
+  // ----- 1) Draw SHORTEST path (solid, colored segments with arrows) -----
+  const bestPath = paths[bestIdx];
+  const segs = bestPath.segments || [];
+  const mainPalette = [
+    "#e41a1c", "#377eb8", "#4daf4a", "#984ea3",
+    "#ff7f00", "#a65628", "#f781bf", "#999999",
+  ];
+
+  segs.forEach((seg, idx) => {
+    const coords = seg.coords || [];
+    if (coords.length < 2) return;
+
+    const gSegPath = coords.map(p => new google.maps.LatLng(p.lat, p.lng));
+    const color = mainPalette[idx % mainPalette.length];
+
+    const pl = new google.maps.Polyline({
+      path: gSegPath,
+      map: map,
+      strokeColor: color,
+      strokeOpacity: 0.95,
+      strokeWeight: 5,
+      icons: [{
+        icon: { path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3 },
+        offset: "20px",
+        repeat: "80px",
+      }],
+    });
+
+    currentPathPolylines.push(pl);
+    gSegPath.forEach(ll => bounds.extend(ll));
+  });
+
+  // mark edges of shortest path as drawn
+  (bestPath.edges || []).forEach(e => {
+    drawnEdges.add(edgeKey(e));
+  });
+
+  // ----- 2) Draw SELECTED path (if different) as dashed multi-color by route -----
+  if (selIdx !== bestIdx) {
+    const selPath = paths[selIdx];
+    const edges = selPath.edges || [];
+    if (edges.length) {
+      const colorPalette = [
+        "#0000aa", "#00aa00", "#aa00aa", "#aa5500",
+        "#008888", "#5555aa", "#aa0055", "#557700",
+      ];
+      let currentCoords = [];
+      let currentColor = colorPalette[0];
+      let colorIdx = 0;
+      let currentRouteKey = null; // MaTuyen|Chieu
+
+      function flushSelSegment() {
+        if (currentCoords.length < 2) return;
+        const gPath = currentCoords.map(p => new google.maps.LatLng(p.lat, p.lng));
+
+        const pl = new google.maps.Polyline({
+          path: gPath,
+          map: map,
+          strokeColor: currentColor,
+          strokeOpacity: 0,  // dashed only
+          strokeWeight: 4,
+          icons: [{
+            icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 2 },
+            offset: "0",
+            repeat: "16px",
+          }],
+        });
+
+        currentPathPolylines.push(pl);
+        gPath.forEach(ll => bounds.extend(ll));
+        currentCoords = [];
+      }
+
+      edges.forEach(e => {
+        const key = edgeKey(e);
+        const coords = e.coords || [];
+        const routeKey = e.MaTuyen + "|" + e.Chieu;
+
+        if (drawnEdges.has(key) || coords.length === 0) {
+          flushSelSegment();
+          return;
+        }
+
+        // new route run -> new color, flush previous
+        if (routeKey !== currentRouteKey && currentCoords.length) {
+          flushSelSegment();
+        }
+        if (routeKey !== currentRouteKey) {
+          currentRouteKey = routeKey;
+          currentColor = colorPalette[colorIdx % colorPalette.length];
+          colorIdx++;
+        }
+
+        drawnEdges.add(key);
+
+        if (!currentCoords.length) {
+          currentCoords = coords.slice();
+        } else {
+          currentCoords = currentCoords.concat(coords.slice(1));
+        }
+      });
+
+      flushSelSegment();
+    }
+  }
+
+  // ----- 3) Draw all OTHER paths (single-color dashed, only non-overlap) -----
+  const altPalette = [
+    "#000000", "#555555", "#880000", "#006666",
+    "#666600", "#660066", "#006600", "#444488",
+    "#884444", "#008888"
+  ];
+  let altColorIndex = 0;
+
+  paths.forEach((p, idx) => {
+    if (idx === bestIdx || idx === selIdx) return;
+    const edges = p.edges || [];
+    if (!edges.length) return;
+
+    const color = altPalette[altColorIndex % altPalette.length];
+    altColorIndex++;
+
+    let coordsAccum = [];
+
+    function flushAlt() {
+      if (coordsAccum.length < 2) return;
+      const gPath = coordsAccum.map(p => new google.maps.LatLng(p.lat, p.lng));
+
+      const pl = new google.maps.Polyline({
+        path: gPath,
+        map: map,
+        strokeColor: color,
+        strokeOpacity: 0,
+        strokeWeight: 3,
+        icons: [{
+          icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 2 },
+          offset: "0",
+          repeat: "16px",
+        }],
+      });
+
+      currentPathPolylines.push(pl);
+      gPath.forEach(ll => bounds.extend(ll));
+      coordsAccum = [];
+    }
+
+    edges.forEach(e => {
+      const key = edgeKey(e);
+      const coords = e.coords || [];
+      if (drawnEdges.has(key) || coords.length === 0) {
+        flushAlt();
+        return;
+      }
+      drawnEdges.add(key);
+
+      if (!coordsAccum.length) {
+        coordsAccum = coords.slice();
+      } else {
+        coordsAccum = coordsAccum.concat(coords.slice(1));
+      }
+    });
+
+    flushAlt();
+  });
+
+  if (!bounds.isEmpty()) {
+    map.fitBounds(bounds);
+  }
+
+  // "Path" summary = currently selected path
+  updatePathPanel(getSelectedPath());
+}
+
+function updatePathList() {
+  const listEl = document.getElementById("pathList");
+  if (!listEl) return;
+
+  listEl.innerHTML = "";
+
+  if (!pathResultData || !Array.isArray(pathResultData.paths)) {
+    listEl.textContent = "(none)";
+    return;
+  }
+
+  const paths = pathResultData.paths;
+
+  paths.forEach((p, idx) => {
+    const row = document.createElement("div");
+    row.className = "path-list-item" + (idx === selectedPathIndex ? " selected" : "");
+
+    const indexSpan = document.createElement("span");
+    indexSpan.className = "path-list-index";
+    indexSpan.textContent = (idx + 1) + (idx === bestPathIndex ? "★" : "");
+
+    const distSpan = document.createElement("span");
+    distSpan.className = "path-list-distance";
+    distSpan.textContent = formatDistance(p.total_distance);
+
+    row.appendChild(indexSpan);
+    row.appendChild(distSpan);
+
+    row.addEventListener("click", () => {
+      selectedPathIndex = idx;
+      renderAllPaths();                    // re-render with this as priority
+      updatePathList();                    // refresh highlighting
+    });
+
+    listEl.appendChild(row);
+  });
 }
