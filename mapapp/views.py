@@ -587,47 +587,6 @@ def update_stop_info_view(request):
     return JsonResponse({"success": True})
 
 def shortest_path_view(request):
-    """
-    GET /shortest-path/?start=MaTramStart&end=MaTramEnd
-
-    Response:
-    {
-      "success": true,
-      "paths": [
-        {
-          "total_distance": ...,
-          "nodes": [...],
-          "stops": [ {MaTram, TenTram, lat, lng, MaLoai}, ... ],
-          "edges": [
-            {
-              "from": "...",
-              "to": "...",
-              "MaTuyen": "...",
-              "Chieu": 0 or 1,
-              "from_STT": ...,
-              "to_STT": ...,
-              "distance": ...
-            },
-            ...
-          ],
-          "polyline": [ {lat, lng}, ... ],          # full geometry
-          "segments": [                             # grouped by route+direction
-            {
-              "MaTuyen": "01",
-              "Chieu": 0,
-              "from": "STOP_A",
-              "to": "STOP_B",
-              "distance": 1234.5,                  # sum of KhoangCach in this subpath
-              "coords": [ {lat, lng}, ... ]        # geometry just for this subpath
-            },
-            ...
-          ]
-        }
-      ],
-      "best_index": 0
-    }
-    """
-
     start = request.GET.get("start")
     end = request.GET.get("end")
 
@@ -639,8 +598,8 @@ def shortest_path_view(request):
 
     # ---------- Helpers ----------
 
-    # If you already have haversine_meters defined globally, you can remove this one
     def haversine_meters(lon1, lat1, lon2, lat2):
+        """Simple haversine in meters."""
         R = 6371000.0
         phi1 = math.radians(lat1)
         phi2 = math.radians(lat2)
@@ -714,7 +673,7 @@ def shortest_path_view(request):
         graph = defaultdict(list)
         node_info = {}
 
-        for _, stop_list in routes.items():
+        for stop_list in routes.values():
             stop_list.sort(key=lambda s: s["STT"])
 
             for s in stop_list:
@@ -753,47 +712,39 @@ def shortest_path_view(request):
 
         return graph, node_info
 
-    def dijkstra_shortest_path(graph, start_node, end_node):
-        """Return {total_distance, nodes, edges} or None."""
-        if start_node == end_node:
-            return {"total_distance": 0.0, "nodes": [start_node], "edges": []}
+    def enumerate_all_paths(graph, start_node, end_node, max_paths=200, max_len=100):
+        """
+        DFS over the directed graph, collecting all simple paths from start_node to end_node.
+        - No node is visited twice in the same path -> no cycle.
+        - max_paths / max_len are safety caps.
+        """
+        paths = []
 
-        dist = {start_node: 0.0}
-        prev = {}
-        prev_edge = {}
-        heap = [(0.0, start_node)]
+        def dfs(node, nodes, edges):
+            if len(paths) >= max_paths:
+                return
+            if len(nodes) > max_len:
+                return
 
-        while heap:
-            d, u = heapq.heappop(heap)
-            if u == end_node:
-                break
-            if d > dist.get(u, float("inf")):
-                continue
+            if node == end_node:
+                total = sum(e["weight"] for e in edges)
+                paths.append(
+                    {"total_distance": total, "nodes": list(nodes), "edges": list(edges)}
+                )
+                return
 
-            for edge in graph.get(u, []):
+            for edge in graph.get(node, []):
                 v = edge["to"]
-                nd = d + edge["weight"]
-                if nd < dist.get(v, float("inf")):
-                    dist[v] = nd
-                    prev[v] = u
-                    prev_edge[v] = edge
-                    heapq.heappush(heap, (nd, v))
+                if v in nodes:  # avoid cycles
+                    continue
+                nodes.append(v)
+                edges.append(edge)
+                dfs(v, nodes, edges)
+                edges.pop()
+                nodes.pop()
 
-        if end_node not in dist:
-            return None
-
-        nodes = []
-        edges = []
-        cur = end_node
-        while cur != start_node:
-            nodes.append(cur)
-            edges.append(prev_edge[cur])
-            cur = prev[cur]
-        nodes.append(start_node)
-        nodes.reverse()
-        edges.reverse()
-
-        return {"total_distance": dist[end_node], "nodes": nodes, "edges": edges}
+        dfs(start_node, [start_node], [])
+        return paths
 
     def load_route_geometry(ma_tuyen, chieu):
         """
@@ -809,7 +760,7 @@ def shortest_path_view(request):
             row = cursor.fetchone()
         if not row or row[0] is None:
             return []
-        # existing helper in your file
+        # uses existing helper in this file
         return wkt_to_latlng_list(row[0])
 
     def closest_index_on_path(path_coords, lat, lng):
@@ -825,7 +776,7 @@ def shortest_path_view(request):
                 best_idx = i
         return best_idx
 
-    # ---------- Build graph & run Dijkstra ----------
+    # ---------- Build graph & enumerate all simple paths ----------
 
     graph, node_info = build_route_graph()
 
@@ -840,20 +791,20 @@ def shortest_path_view(request):
             status=404,
         )
 
-    best = dijkstra_shortest_path(graph, start, end)
-    if best is None:
+    raw_paths = enumerate_all_paths(graph, start, end)
+    if not raw_paths:
         return JsonResponse(
             {"success": False, "error": "No path found"},
             status=404,
         )
 
-    nodes = best["nodes"]
-    edges = best["edges"]
-    stops = [node_info[ma_tram] for ma_tram in nodes]
+    # sort by total distance and pick index 0 as "shortest"
+    raw_paths.sort(key=lambda p: p["total_distance"])
+    best_index = 0
 
-    # ---------- Build geometry + segments grouped by (MaTuyen, Chieu) ----------
+    # ---------- Build geometry & payload for each path ----------
 
-    route_geom_cache = {}  # (MaTuyen, Chieu) -> list[{lat,lng}]
+    route_geom_cache = {}
 
     def get_geom(ma_tuyen, chieu):
         key = (ma_tuyen, chieu)
@@ -861,100 +812,105 @@ def shortest_path_view(request):
             route_geom_cache[key] = load_route_geometry(ma_tuyen, chieu)
         return route_geom_cache[key]
 
-    combined_polyline = []
-    segments = []
-    current_segment = None
+    paths_payload = []
 
-    for edge in edges:
-        ma_tuyen = edge["MaTuyen"]
-        chieu = edge["Chieu"]
-        from_id = edge["from"]
-        to_id = edge["to"]
+    for p in raw_paths:
+        nodes = p["nodes"]
+        edges = p["edges"]
+        stops = [node_info[n] for n in nodes]
 
-        geom = get_geom(ma_tuyen, chieu)
-        if not geom:
-            # fallback: straight line between stops
-            a = node_info[from_id]
-            b = node_info[to_id]
-            seg_coords = [
-                {"lat": a["lat"], "lng": a["lng"]},
-                {"lat": b["lat"], "lng": b["lng"]},
-            ]
-        else:
-            a = node_info[from_id]
-            b = node_info[to_id]
-            i_start = closest_index_on_path(geom, a["lat"], a["lng"])
-            i_end = closest_index_on_path(geom, b["lat"], b["lng"])
+        combined_polyline = []
+        segments = []
+        current_segment = None
+        edges_json = []
 
-            if i_start <= i_end:
-                seg_coords = geom[i_start : i_end + 1]
+        for edge in edges:
+            ma_tuyen = edge["MaTuyen"]
+            chieu = edge["Chieu"]
+            from_id = edge["from"]
+            to_id = edge["to"]
+
+            geom = get_geom(ma_tuyen, chieu)
+            if not geom:
+                a = node_info[from_id]
+                b = node_info[to_id]
+                seg_coords = [
+                    {"lat": a["lat"], "lng": a["lng"]},
+                    {"lat": b["lat"], "lng": b["lng"]},
+                ]
             else:
-                seg_coords = list(reversed(geom[i_end : i_start + 1]))
+                a = node_info[from_id]
+                b = node_info[to_id]
+                i_start = closest_index_on_path(geom, a["lat"], a["lng"])
+                i_end = closest_index_on_path(geom, b["lat"], b["lng"])
+                if i_start <= i_end:
+                    seg_coords = geom[i_start : i_end + 1]
+                else:
+                    seg_coords = list(reversed(geom[i_end : i_start + 1]))
 
-        # grow full combined polyline
-        if not combined_polyline:
-            combined_polyline.extend(seg_coords)
-        else:
-            combined_polyline.extend(seg_coords[1:])
+            # grow full polyline
+            if not combined_polyline:
+                combined_polyline.extend(seg_coords)
+            else:
+                combined_polyline.extend(seg_coords[1:])
 
-        # group into route+direction segments
-        if (
-            current_segment is None
-            or current_segment["MaTuyen"] != ma_tuyen
-            or current_segment["Chieu"] != chieu
-        ):
-            # close previous
-            if current_segment is not None:
-                segments.append(current_segment)
-            current_segment = {
-                "MaTuyen": ma_tuyen,
-                "Chieu": chieu,
-                "from": from_id,
-                "to": to_id,
-                "distance": edge["weight"],  # start new sum
-                "coords": seg_coords[:],
-            }
-        else:
-            # extend existing segment (same route & direction)
-            current_segment["to"] = to_id
-            current_segment["distance"] += edge["weight"]
-            current_segment["coords"].extend(seg_coords[1:])
+            # group into segments by (MaTuyen, Chieu)
+            if (
+                current_segment is None
+                or current_segment["MaTuyen"] != ma_tuyen
+                or current_segment["Chieu"] != chieu
+            ):
+                if current_segment is not None:
+                    segments.append(current_segment)
+                current_segment = {
+                    "MaTuyen": ma_tuyen,
+                    "Chieu": chieu,
+                    "from": from_id,
+                    "to": to_id,
+                    "distance": edge["weight"],
+                    "coords": list(seg_coords),
+                }
+            else:
+                current_segment["to"] = to_id
+                current_segment["distance"] += edge["weight"]
+                current_segment["coords"].extend(seg_coords[1:])
 
-    if current_segment is not None:
-        segments.append(current_segment)
+            # per-edge coords for frontend dedupe
+            edges_json.append(
+                {
+                    "from": from_id,
+                    "to": to_id,
+                    "MaTuyen": ma_tuyen,
+                    "Chieu": chieu,
+                    "from_STT": edge["from_STT"],
+                    "to_STT": edge["to_STT"],
+                    "distance": edge["weight"],
+                    "coords": list(seg_coords),
+                }
+            )
 
-    # ---------- Normalize edges for JSON ----------
+        if current_segment is not None:
+            segments.append(current_segment)
 
-    edges_json = []
-    for e in edges:
-        edges_json.append(
+        paths_payload.append(
             {
-                "from": e["from"],
-                "to": e["to"],
-                "MaTuyen": e["MaTuyen"],
-                "Chieu": e["Chieu"],
-                "from_STT": e["from_STT"],
-                "to_STT": e["to_STT"],
-                "distance": e["weight"],
+                "total_distance": p["total_distance"],
+                "nodes": nodes,
+                "stops": stops,
+                "edges": edges_json,
+                "polyline": combined_polyline,
+                "segments": segments,
             }
         )
-
-    path_payload = {
-        "total_distance": best["total_distance"],
-        "nodes": nodes,
-        "stops": stops,
-        "edges": edges_json,
-        "polyline": combined_polyline,
-        "segments": segments,
-    }
 
     return JsonResponse(
         {
             "success": True,
-            "paths": [path_payload],
-            "best_index": 0,
+            "paths": paths_payload,   # ALL non-circular paths
+            "best_index": best_index, # index of shortest
         }
     )
+
 
 def enumerate_bounded_paths(graph, start, end, best_distance, max_factor=1.5, max_paths=10):
     if best_distance <= 0:

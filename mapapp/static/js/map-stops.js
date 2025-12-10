@@ -794,44 +794,23 @@ function renderPathsOnMap(data) {
     const bestPath = data.paths[bestIndex];
     const bounds = new google.maps.LatLngBounds();
 
-    // 1) Draw all non-best paths as faint dashed lines (optional)
-    data.paths.forEach((path, idx) => {
-        if (idx === bestIndex) return;
+    // Track drawn edges: "from->to"
+    const drawnEdges = new Set();
 
-        const gPath = path.polyline.map(
-            p => new google.maps.LatLng(p.lat, p.lng)
-        );
-
-        const lineOptions = {
-            path: gPath,
-            map: map,
-            strokeColor: "#999999",
-            strokeOpacity: 0.6,
-            strokeWeight: 3,
-            icons: [{
-                icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 },
-                offset: "0",
-                repeat: "12px",
-            }],
-        };
-
-        const polyline = new google.maps.Polyline(lineOptions);
-        currentPathPolylines.push(polyline);
-        gPath.forEach(ll => bounds.extend(ll));
-    });
-
-    // 2) Draw BEST path with per-subpath color + arrows
+    // ---------- 1) Draw BEST path (colored segments + arrows) ----------
     const segs = bestPath.segments || [];
-    const colorPalette = [
+    const mainPalette = [
         "#e41a1c", "#377eb8", "#4daf4a", "#984ea3",
         "#ff7f00", "#a65628", "#f781bf", "#999999",
     ];
 
     segs.forEach((seg, idx) => {
-        const gSegPath = seg.coords.map(
+        const gSegPath = (seg.coords || []).map(
             p => new google.maps.LatLng(p.lat, p.lng)
         );
-        const color = colorPalette[idx % colorPalette.length];
+        if (gSegPath.length < 2) return;
+
+        const color = mainPalette[idx % mainPalette.length];
 
         const lineOptions = {
             path: gSegPath,
@@ -854,11 +833,91 @@ function renderPathsOnMap(data) {
         gSegPath.forEach(ll => bounds.extend(ll));
     });
 
+    // Mark BEST path edges as drawn
+    (bestPath.edges || []).forEach(e => {
+        drawnEdges.add(edgeKey(e));
+    });
+
+    // ---------- 2) Draw OTHER paths: only non-overlapping parts ----------
+    const altPalette = [
+        "#000000", "#555555", "#880000", "#006666",
+        "#666600", "#660066", "#006600", "#444488",
+        "#884444", "#008888"
+    ];
+    let altColorIndex = 0;
+
+    data.paths.forEach((path, idx) => {
+        if (idx === bestIndex) return;   // skip best, already drawn
+
+        const edges = path.edges || [];
+        if (!edges.length) return;
+
+        const color = altPalette[altColorIndex % altPalette.length];
+        altColorIndex++;
+
+        let currentCoords = [];
+
+        function flushSegment() {
+            if (currentCoords.length < 2) return;
+            const gPath = currentCoords.map(
+                p => new google.maps.LatLng(p.lat, p.lng)
+            );
+
+            const lineOptions = {
+                path: gPath,
+                map: map,
+                strokeColor: color,
+                strokeOpacity: 0,      // hide solid line
+                strokeWeight: 3,
+                icons: [{
+                    icon: {
+                        path: "M 0,-1 0,1",
+                        strokeOpacity: 1,
+                        scale: 2,
+                    },
+                    offset: "0",
+                    repeat: "16px",      // - . - . -
+                }],
+            };
+
+            const polyline = new google.maps.Polyline(lineOptions);
+            currentPathPolylines.push(polyline);
+            gPath.forEach(ll => bounds.extend(ll));
+            currentCoords = [];
+        }
+
+        edges.forEach(edge => {
+            const key = edgeKey(edge);
+
+            // Already drawn by best or a previous alt path -> skip
+            if (drawnEdges.has(key)) {
+                // End any ongoing segment
+                flushSegment();
+                return;
+            }
+
+            // Mark this edge as drawn so later paths don't re-draw it
+            drawnEdges.add(key);
+
+            const ec = edge.coords || [];
+            if (!ec.length) return;
+
+            if (!currentCoords.length) {
+                currentCoords = ec.slice();
+            } else {
+                // Avoid duplicate join point
+                currentCoords = currentCoords.concat(ec.slice(1));
+            }
+        });
+
+        // Flush any final fragment of this path
+        flushSegment();
+    });
+
     if (!bounds.isEmpty()) {
         map.fitBounds(bounds);
     }
 
-    // 3) Update the dialog (Start/End + shortest path list)
     updatePathPanel(bestPath);
 }
 
@@ -894,3 +953,6 @@ function handleSetAsEnd(stop, marker) {
 }
 
 
+function edgeKey(edge) {
+    return edge.from + "->" + edge.to;
+}
