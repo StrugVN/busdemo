@@ -2,12 +2,12 @@
 let allRoutesPolylines = [];
 
 function enforceMinZoom(minZoom = 12) {
-  const listener = google.maps.event.addListener(map, "idle", function () {
-    if (map.getZoom() < minZoom) {
-      map.setZoom(minZoom);
-    }
-    google.maps.event.removeListener(listener);
-  });
+    const listener = google.maps.event.addListener(map, "idle", function () {
+        if (map.getZoom() < minZoom) {
+            map.setZoom(minZoom);
+        }
+        google.maps.event.removeListener(listener);
+    });
 }
 
 
@@ -55,8 +55,18 @@ async function loadAllRoutesForCurrentDirection() {
                 map,
                 strokeColor: color,
                 strokeWeight: 2,
-                clickable: false,     // simple display only
+                clickable: true,      // now selectable
                 editable: false
+            });
+
+            // Click on a preview route → select it + load single-route view
+            poly.addListener("click", () => {
+                const routeSelect = document.getElementById("routeSelect");
+                if (routeSelect) {
+                    routeSelect.value = r.MaTuyen;   // pick this route
+                }
+                // uses current directionSelect value, clears previews, draws main route
+                loadAndDrawRoute();
             });
 
             allRoutesPolylines.push(poly);
@@ -68,9 +78,9 @@ async function loadAllRoutesForCurrentDirection() {
     }
 
     if (!bounds.isEmpty()) {
-    map.fitBounds(bounds);
-    enforceMinZoom(10);
-}
+        map.fitBounds(bounds);
+        enforceMinZoom(10);
+    }
 
 }
 
@@ -252,10 +262,10 @@ async function loadAndDrawRoute() {
 
         const content = `
         <div>
-          <b>Route ${currentRouteMaTuyen} — ${r.TenTuyen}</b><br/>
-          Direction: ${currentRouteChieu === "0" ? "Chiều đi" : "Chiều về"}<br/><br/>
+            <b>Route ${currentRouteMaTuyen} — ${r.TenTuyen}</b><br/>
+            Direction: ${currentRouteChieu === "0" ? "Chiều đi" : "Chiều về"}<br/><br/>
 
-          <table style="font-size:12px;">
+            <table style="font-size:12px;">
             <tr><td><b>Độ dài:</b></td><td>${r.DoDai ?? '–'} km</td></tr>
             <tr><td><b>Giá vé:</b></td><td>${r.GiaVe ?? '–'} đ</td></tr>
             <tr><td><b>Thời gian toàn tuyến:</b></td><td>${r.ThoiGianToanTuyen ?? '–'} phút</td></tr>
@@ -263,27 +273,47 @@ async function loadAndDrawRoute() {
             <tr><td><b>Kết thúc:</b></td><td>${r.GioKetThuc ?? '–'}</td></tr>
             <tr><td><b>Giữa 2 chuyến:</b></td><td>${r.ThoiGianGiua2Tuyen ?? '–'} phút</td></tr>
             <tr><td><b>Số chuyến:</b></td><td>${r.SoChuyen ?? '–'}</td></tr>
-          </table>
+            </table>
 
-          <button id="editRouteBtn" type="button"
-                  style="background:#2196F3;color:white;border:none;padding:5px 10px;
-                        border-radius:4px;margin-top:6px;cursor:pointer;">
-            Edit route
-          </button>
+            <div style="display:flex; gap:6px; margin-top:6px;">
+            <button id="editRouteBtn" type="button"
+                    style="flex:1;background:#2196F3;color:white;border:none;
+                            padding:5px 10px;border-radius:4px;cursor:pointer;">
+                Edit path
+            </button>
+
+            <button id="editRouteInfoBtn" type="button"
+                    style="flex:1;background:#2196F3;color:white;border:none;
+                            padding:5px 10px;border-radius:4px;cursor:pointer;">
+                Edit info
+            </button>
+            </div>
         </div>
-      `;
+        `;
+
 
         routeInfoWindow.setContent(content);
         routeInfoWindow.setPosition(e.latLng);
         routeInfoWindow.open(map);
 
         google.maps.event.addListenerOnce(routeInfoWindow, "domready", () => {
-            const btn = document.getElementById("editRouteBtn");
-            if (!btn) return;
-            btn.onclick = () => {
-                enterRouteEditMode();
-                routeInfoWindow.close();
-            };
+            const editRouteBtn = document.getElementById("editRouteBtn");
+            const editRouteInfoBtn = document.getElementById("editRouteInfoBtn");
+
+            if (editRouteBtn) {
+                editRouteBtn.onclick = () => {
+                    // existing behavior
+                    enterRouteEditMode();
+                    routeInfoWindow.close();
+                };
+            }
+
+            if (editRouteInfoBtn) {
+                editRouteInfoBtn.onclick = () => {
+                    openEditRouteInfoPanel();
+                    routeInfoWindow.close();
+                };
+            }
         });
     });
 
@@ -408,4 +438,159 @@ function cancelRouteChanges() {
     showMessage("Changes cancelled.", 2500);
 
     exitRouteEditMode();
+}
+
+function htmlEscape(str) {
+    if (str == null) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function openEditRouteInfoPanel() {
+    if (!currentRouteMaTuyen) {
+        showMessage("Select a route first.", 2500);
+        return;
+    }
+
+    const panel = document.getElementById("addStopPanel");
+    if (!panel) return;
+
+    const r = ROUTE_INFO[currentRouteMaTuyen] || {};
+
+    panel.style.display = "block";
+
+    panel.innerHTML = `
+      <div>
+        <h3 style="margin-top:0;margin-bottom:8px;">
+          Edit route info – ${currentRouteMaTuyen}
+        </h3>
+
+        <label style="font-size:12px;">Route name:</label><br/>
+        <input id="ri_TenTuyen" type="text"
+               style="width:100%;margin-bottom:6px;padding:3px 4px;"
+               value="${r.TenTuyen ?? ""}"/>
+
+        <label style="font-size:12px;">Độ dài (km):</label><br/>
+        <input id="ri_DoDai" type="number" step="0.01"
+               style="width:100%;margin-bottom:6px;padding:3px 4px;"
+               value="${r.DoDai ?? ""}"/>
+
+        <label style="font-size:12px;">Giá vé (đ):</label><br/>
+        <input id="ri_GiaVe" type="number" step="1"
+               style="width:100%;margin-bottom:6px;padding:3px 4px;"
+               value="${r.GiaVe ?? ""}"/>
+
+        <label style="font-size:12px;">Thời gian toàn tuyến (phút):</label><br/>
+        <input id="ri_ThoiGianToanTuyen" type="number" step="1"
+               style="width:100%;margin-bottom:6px;padding:3px 4px;"
+               value="${r.ThoiGianToanTuyen ?? ""}"/>
+
+        <label style="font-size:12px;">Giờ bắt đầu (HH:MM):</label><br/>
+        <input id="ri_GioBatDay" type="text" placeholder="06:00"
+               style="width:100%;margin-bottom:6px;padding:3px 4px;"
+               value="${r.GioBatDay ?? ""}"/>
+
+        <label style="font-size:12px;">Giờ kết thúc (HH:MM):</label><br/>
+        <input id="ri_GioKetThuc" type="text" placeholder="18:00"
+               style="width:100%;margin-bottom:6px;padding:3px 4px;"
+               value="${r.GioKetThuc ?? ""}"/>
+
+        <label style="font-size:12px;">Thời gian giữa 2 chuyến (phút):</label><br/>
+        <input id="ri_ThoiGianGiua2Tuyen" type="number" step="1"
+               style="width:100%;margin-bottom:6px;padding:3px 4px;"
+               value="${r.ThoiGianGiua2Tuyen ?? ""}"/>
+
+        <label style="font-size:12px;">Số chuyến / ngày:</label><br/>
+        <input id="ri_SoChuyen" type="number" step="1"
+               style="width:100%;margin-bottom:10px;padding:3px 4px;"
+               value="${r.SoChuyen ?? ""}"/>
+
+        <div style="display:flex;gap:6px;justify-content:flex-end;">
+          <button id="ri_cancelBtn"
+                  style="padding:4px 8px;border-radius:4px;border:1px solid #ddd;
+                         background:#fafafa;cursor:pointer;">
+            Cancel
+          </button>
+          <button id="ri_saveBtn"
+                  style="padding:4px 10px;border-radius:4px;border:none;
+                         background:#2196F3;color:white;cursor:pointer;">
+            Save
+          </button>
+        </div>
+      </div>
+    `;
+
+    const cancelBtn = panel.querySelector("#ri_cancelBtn");
+    const saveBtn = panel.querySelector("#ri_saveBtn");
+
+    if (cancelBtn) {
+        cancelBtn.onclick = () => {
+            panel.style.display = "none";
+        };
+    }
+
+    if (saveBtn) {
+        saveBtn.onclick = async () => {
+            const payload = {
+                MaTuyen: currentRouteMaTuyen,
+                TenTuyen: panel.querySelector("#ri_TenTuyen").value.trim(),
+                DoDai: panel.querySelector("#ri_DoDai").value.trim(),
+                GiaVe: panel.querySelector("#ri_GiaVe").value.trim(),
+                ThoiGianToanTuyen: panel.querySelector("#ri_ThoiGianToanTuyen").value.trim(),
+                GioBatDay: panel.querySelector("#ri_GioBatDay").value.trim() || null,
+                GioKetThuc: panel.querySelector("#ri_GioKetThuc").value.trim() || null,
+                ThoiGianGiua2Tuyen: panel.querySelector("#ri_ThoiGianGiua2Tuyen").value.trim(),
+                SoChuyen: panel.querySelector("#ri_SoChuyen").value.trim(),
+            };
+
+            try {
+                const res = await fetch(UPDATE_ROUTE_INFO_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+                const data = await res.json();
+
+                if (!data.success) {
+                    showMessage("Failed to save route info", 4000);
+                    return;
+                }
+
+                // update local cache
+                const ri = ROUTE_INFO[currentRouteMaTuyen] || {};
+                ri.TenTuyen = payload.TenTuyen || null;
+                ri.DoDai = payload.DoDai ? parseFloat(payload.DoDai) : null;
+                ri.GiaVe = payload.GiaVe ? parseInt(payload.GiaVe, 10) : null;
+                ri.ThoiGianToanTuyen = payload.ThoiGianToanTuyen ? parseInt(payload.ThoiGianToanTuyen, 10) : null;
+                ri.GioBatDay = payload.GioBatDay;
+                ri.GioKetThuc = payload.GioKetThuc;
+                ri.ThoiGianGiua2Tuyen = payload.ThoiGianGiua2Tuyen ? parseInt(payload.ThoiGianGiua2Tuyen, 10) : null;
+                ri.SoChuyen = payload.SoChuyen ? parseInt(payload.SoChuyen, 10) : null;
+                ROUTE_INFO[currentRouteMaTuyen] = ri;
+
+                panel.style.display = "none";
+                showMessage("Route info updated.", 2500);
+            } catch (e) {
+                console.error(e);
+                showMessage("Error saving route info.", 4000);
+            }
+        };
+    }
+}
+
+function computeRouteLengthKm(polyline) {
+    if (!polyline) return 0;
+
+    const path = polyline.getPath();
+    let total = 0;
+
+    for (let i = 0; i < path.getLength() - 1; i++) {
+        const p1 = path.getAt(i);
+        const p2 = path.getAt(i + 1);
+        total += google.maps.geometry.spherical.computeDistanceBetween(p1, p2);
+    }
+    return total / 1000; // convert meters → km
 }

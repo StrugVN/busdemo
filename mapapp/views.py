@@ -85,14 +85,20 @@ def map_view(request):
 
     routes = []
     for r in rows:
+        gio_bat_day = r[5]
+        gio_ket_thuc = r[6]
+
+        def fmt_time(t):
+            return t.strftime("%H:%M") if t else None
+    
         routes.append({
             "MaTuyen": r[0],
             "TenTuyen": r[1],
             "DoDai": r[2],
             "GiaVe": r[3],
             "ThoiGianToanTuyen": r[4],
-            "GioBatDay": r[5],
-            "GioKetThuc": r[6],
+            "GioBatDay": fmt_time(gio_bat_day),
+            "GioKetThuc": fmt_time(gio_ket_thuc),
             "ThoiGianGiua2Tuyen": r[7],
             "SoChuyen": r[8],
         })
@@ -951,3 +957,58 @@ def enumerate_bounded_paths(graph, start, end, best_distance, max_factor=1.5, ma
     # sort by distance and clip
     paths.sort(key=lambda p: p["total_distance"])
     return paths[:max_paths]
+
+@csrf_exempt
+@require_POST
+def update_route_info_view(request):
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+        ma_tuyen = data["MaTuyen"]
+
+        ten_tuyen = data.get("TenTuyen")
+        do_dai = data.get("DoDai")
+        gia_ve = data.get("GiaVe")
+        thoi_gian_toan_tuyen = data.get("ThoiGianToanTuyen")
+        gio_bat_day = data.get("GioBatDay")       # expect 'HH:MM' or full timestamp string
+        gio_ket_thuc = data.get("GioKetThuc")
+        thoi_gian_giua2tuyen = data.get("ThoiGianGiua2Tuyen")
+        so_chuyen = data.get("SoChuyen")
+
+        # Coerce numeric fields if present
+        do_dai = float(do_dai) if do_dai not in (None, "",) else None
+        gia_ve = int(gia_ve) if gia_ve not in (None, "",) else None
+        thoi_gian_toan_tuyen = int(thoi_gian_toan_tuyen) if thoi_gian_toan_tuyen not in (None, "",) else None
+        thoi_gian_giua2tuyen = int(thoi_gian_giua2tuyen) if thoi_gian_giua2tuyen not in (None, "",) else None
+        so_chuyen = int(so_chuyen) if so_chuyen not in (None, "",) else None
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": f"Invalid payload: {e}"}, status=400)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE tuyen_bus
+            SET TenTuyen=%s,
+                DoDai=%s,
+                GiaVe=%s,
+                ThoiGianToanTuyen=%s,
+                GioBatDay=%s,
+                GioKetThuc=%s,
+                ThoiGianGiua2Tuyen=%s,
+                SoChuyen=%s
+            WHERE MaTuyen=%s
+            """,
+            [
+                ten_tuyen,
+                do_dai,
+                gia_ve,
+                thoi_gian_toan_tuyen,
+                gio_bat_day,
+                gio_ket_thuc,
+                thoi_gian_giua2tuyen,
+                so_chuyen,
+                ma_tuyen,
+            ],
+        )
+
+    return JsonResponse({"success": True})
