@@ -11,7 +11,7 @@
  Target Server Version : 100424
  File Encoding         : 65001
 
- Date: 10/12/2025 16:48:05
+ Date: 11/12/2025 09:59:58
 */
 
 SET NAMES utf8mb4;
@@ -68,7 +68,7 @@ CREATE TABLE `tram_dung`  (
 -- Records of tram_dung
 -- ----------------------------
 INSERT INTO `tram_dung` VALUES ('02_001', '1', '31732', 'Bến xe khách Ngã Năm', 105.60912270459536, 9.559945590366738, 'HJ55+VJP, TT. Ngã Năm, tx. Ngã Năm, Sóc Trăng, Vietnam', '2025-12-09 14:54:01');
-INSERT INTO `tram_dung` VALUES ('02_003', '2', '31510', '382A Đường Lê Duẩn, Phường 9', 105.98849134243396, 9.596918505268071, '382A Đường Lê Duẩn, Phường 9, Sóc Trăng, Vietnam', '2025-12-09 16:03:33');
+INSERT INTO `tram_dung` VALUES ('02_003', '2', '31510', '382A Đường Lê Duẩn, Phường 9', 105.98853220905728, 9.596768366618551, '382A Đường Lê Duẩn, Phường 9, Sóc Trăng, Vietnam', '2025-12-09 16:03:33');
 INSERT INTO `tram_dung` VALUES ('02_004', '2', '31510', '123, 113 Đường Lê Hồng Phong', 105.97392823974378, 9.59640431974352, '123, 113 Đường Lê Hồng Phong, Phường 3, Sóc Trăng, Vietnam', '2025-12-09 16:05:52');
 INSERT INTO `tram_dung` VALUES ('02_005', '2', '31510', '337 Phú Lợi, Phường 2', 105.96151358843426, 9.599312997598904, '337 Phú Lợi, Phường 2, Sóc Trăng, Vietnam', '2025-12-09 16:08:03');
 INSERT INTO `tram_dung` VALUES ('02_006', '2', '31510', 'TP. Sóc Trăng, Phường 2', 105.95571149683425, 9.586913881911348, 'TP. Sóc Trăng, Phường 2, Tp. Sóc Trăng, Sóc Trăng, Vietnam', '2025-12-09 16:09:00');
@@ -123,13 +123,13 @@ INSERT INTO `tram_dung` VALUES ('11_016', '2', '31135', '30/4 trạm', 105.76984
 INSERT INTO `tram_dung` VALUES ('11_017', '2', '31135', 'Nguyễn Văn Linh - Quán Cây Dừa', 105.76690169103405, 10.020575876987888, 'Quán Cây Dừa, Hưng Lợi, Ninh Kiều, Cần Thơ, Vietnam', '2025-12-05 16:32:38');
 INSERT INTO `tram_dung` VALUES ('11_018', '2', '31135', 'Nguyễn Văn Linh - 10', 105.76399687752931, 10.022107117814842, '14 Đ. Nguyễn Văn Linh, Hưng Lợi, Ninh Kiều, Cần Thơ, Vietnam', '2025-12-05 16:32:38');
 INSERT INTO `tram_dung` VALUES ('11_019', '2', '31135', 'Nguyễn Văn Linh - 30', 105.76263360714205, 10.023092911434023, '30, Hưng Lợi, Ninh Kiều, Cần Thơ, Vietnam', '2025-12-05 16:32:38');
-INSERT INTO `tram_dung` VALUES ('98_001', '2', NULL, 'JXG3+663, Phường 7', 105.95255723625604, 9.625612207318454, 'JXG3+663, Phường 7, Sóc Trăng, Vietnam', '2025-12-10 16:37:54');
-INSERT INTO `tram_dung` VALUES ('98_002', '2', NULL, 'JW6X+WMX, Đ. Tránh TP. Sóc Trăng', 105.94950971236936, 9.611809497874122, 'JW6X+WMX, Đ. Tránh TP. Sóc Trăng, Phường 7, Châu Thành, Sóc Trăng, Vietnam', '2025-12-10 16:38:01');
-INSERT INTO `tram_dung` VALUES ('98_003', '2', NULL, 'HWQW+WG6, 170 Đ. Tránh TP. Sóc Trăng', 105.94630956218299, 9.58970820860522, 'HWQW+WG6, 170 Đ. Tránh TP. Sóc Trăng, Phường 10, Châu Thành, Sóc Trăng, Vietnam', '2025-12-10 16:38:11');
-INSERT INTO `tram_dung` VALUES ('98_004', '2', NULL, 'HW7X+W7G, QL1A', 105.94822543604747, 9.564639414444544, 'HW7X+W7G, QL1A, Đại Tâm, Mỹ Xuyên, Sóc Trăng, Vietnam', '2025-12-10 16:38:33');
-INSERT INTO `tram_dung` VALUES ('98_005', '2', NULL, '22 ĐT934, Phường 10', 105.95806176461089, 9.564076803476686, '22 ĐT934, Phường 10, Sóc Trăng, Vietnam', '2025-12-10 16:38:39');
-INSERT INTO `tram_dung` VALUES ('99_001', '1', NULL, 'PPHW+6F Phụng Hiệp District, Hau Giang', 105.74621422103075, 9.728020030174381, 'PPHW+6F Phụng Hiệp District, Hau Giang, Vietnam', '2025-12-10 16:22:23');
-INSERT INTO `tram_dung` VALUES ('99_002', '1', NULL, 'PP2H+7J Phụng Hiệp District, Hau Giang', 105.72901191569132, 9.700652296343504, 'PP2H+7J Phụng Hiệp District, Hau Giang, Vietnam', '2025-12-10 16:22:43');
+INSERT INTO `tram_dung` VALUES ('98_001', '2', '31507', 'JXG3+663, Phường 7', 105.95255723625604, 9.625612207318454, 'JXG3+663, Phường 7, Sóc Trăng, Vietnam', '2025-12-10 16:37:54');
+INSERT INTO `tram_dung` VALUES ('98_002', '2', '31507', 'JW6X+WMX, Đ. Tránh TP. Sóc Trăng', 105.94950971236936, 9.611809497874122, 'JW6X+WMX, Đ. Tránh TP. Sóc Trăng, Phường 7, Châu Thành, Sóc Trăng, Vietnam', '2025-12-10 16:38:01');
+INSERT INTO `tram_dung` VALUES ('98_003', '2', '31507', 'HWQW+WG6, 170 Đ. Tránh TP. Sóc Trăng', 105.94630956218299, 9.58970820860522, 'HWQW+WG6, 170 Đ. Tránh TP. Sóc Trăng, Phường 10, Châu Thành, Sóc Trăng, Vietnam', '2025-12-10 16:38:11');
+INSERT INTO `tram_dung` VALUES ('98_004', '2', '31507', 'HW7X+W7G, QL1A', 105.94822543604747, 9.564639414444544, 'HW7X+W7G, QL1A, Đại Tâm, Mỹ Xuyên, Sóc Trăng, Vietnam', '2025-12-10 16:38:33');
+INSERT INTO `tram_dung` VALUES ('98_005', '2', '31507', '22 ĐT934, Phường 10', 105.95806176461089, 9.564076803476686, '22 ĐT934, Phường 10, Sóc Trăng, Vietnam', '2025-12-10 16:38:39');
+INSERT INTO `tram_dung` VALUES ('99_001', '1', '31420', 'PPHW+6F Phụng Hiệp District, Hau Giang', 105.74621422103075, 9.728020030174381, 'PPHW+6F Phụng Hiệp District, Hau Giang, Vietnam', '2025-12-10 16:22:23');
+INSERT INTO `tram_dung` VALUES ('99_002', '1', '31420', 'PP2H+7J Phụng Hiệp District, Hau Giang', 105.72901191569132, 9.700652296343504, 'PP2H+7J Phụng Hiệp District, Hau Giang, Vietnam', '2025-12-10 16:22:43');
 
 -- ----------------------------
 -- Table structure for tuyen_bus
@@ -229,16 +229,16 @@ INSERT INTO `tuyen_tram` VALUES ('02', '02_003', 6, 3513.21, 0, '2025-12-09 16:0
 INSERT INTO `tuyen_tram` VALUES ('02', '02_004', 5, 2032.15, 0, '2025-12-09 16:05:52');
 INSERT INTO `tuyen_tram` VALUES ('02', '02_005', 7, 1770.93, 0, '2025-12-09 16:08:03');
 INSERT INTO `tuyen_tram` VALUES ('02', '02_006', 8, 2250.97, 0, '2025-12-09 16:09:00');
-INSERT INTO `tuyen_tram` VALUES ('02', '02_007', 9, 3082.48, 0, '2025-12-09 16:09:24');
-INSERT INTO `tuyen_tram` VALUES ('02', '02_008', 10, 1705.88, 0, '2025-12-09 16:10:38');
-INSERT INTO `tuyen_tram` VALUES ('02', '02_009', 11, 5764.86, 0, '2025-12-09 16:11:09');
-INSERT INTO `tuyen_tram` VALUES ('02', '02_010', 12, 1855.61, 0, '2025-12-09 16:12:29');
-INSERT INTO `tuyen_tram` VALUES ('02', '02_011', 13, 4502.21, 0, '2025-12-09 16:12:49');
-INSERT INTO `tuyen_tram` VALUES ('02', '02_012', 14, 4747.26, 0, '2025-12-09 16:13:20');
-INSERT INTO `tuyen_tram` VALUES ('02', '02_013', 15, 1498.96, 0, '2025-12-09 16:14:17');
-INSERT INTO `tuyen_tram` VALUES ('02', '02_014', 16, 2747.67, 0, '2025-12-09 16:14:27');
-INSERT INTO `tuyen_tram` VALUES ('02', '02_015', 17, 23053, 0, '2025-12-09 16:15:40');
-INSERT INTO `tuyen_tram` VALUES ('02', '02_001', 18, NULL, 0, '2025-12-09 16:16:13');
+INSERT INTO `tuyen_tram` VALUES ('02', '02_007', 9, 456.262, 0, '2025-12-09 16:09:24');
+INSERT INTO `tuyen_tram` VALUES ('02', '02_008', 11, 1705.88, 0, '2025-12-09 16:10:38');
+INSERT INTO `tuyen_tram` VALUES ('02', '02_009', 12, 5764.86, 0, '2025-12-09 16:11:09');
+INSERT INTO `tuyen_tram` VALUES ('02', '02_010', 13, 1855.61, 0, '2025-12-09 16:12:29');
+INSERT INTO `tuyen_tram` VALUES ('02', '02_011', 14, 4502.21, 0, '2025-12-09 16:12:49');
+INSERT INTO `tuyen_tram` VALUES ('02', '02_012', 15, 4747.26, 0, '2025-12-09 16:13:20');
+INSERT INTO `tuyen_tram` VALUES ('02', '02_013', 16, 1498.96, 0, '2025-12-09 16:14:17');
+INSERT INTO `tuyen_tram` VALUES ('02', '02_014', 17, 2747.67, 0, '2025-12-09 16:14:27');
+INSERT INTO `tuyen_tram` VALUES ('02', '02_015', 18, 23053, 0, '2025-12-09 16:15:40');
+INSERT INTO `tuyen_tram` VALUES ('02', '02_001', 19, NULL, 0, '2025-12-09 16:16:13');
 INSERT INTO `tuyen_tram` VALUES ('02', '02_015', 2, 2747.67, 1, '2025-12-09 16:16:26');
 INSERT INTO `tuyen_tram` VALUES ('02', '02_014', 3, 1498.96, 1, '2025-12-09 16:16:28');
 INSERT INTO `tuyen_tram` VALUES ('02', '02_013', 4, 4747.26, 1, '2025-12-09 16:16:30');
@@ -327,6 +327,7 @@ INSERT INTO `tuyen_tram` VALUES ('98', '98_003', 7, 2922.61, 1, '2025-12-10 16:4
 INSERT INTO `tuyen_tram` VALUES ('98', '98_002', 8, 1266.35, 1, '2025-12-10 16:41:02');
 INSERT INTO `tuyen_tram` VALUES ('98', '98_001', 9, 2607.04, 1, '2025-12-10 16:41:06');
 INSERT INTO `tuyen_tram` VALUES ('98', '04_002', 10, NULL, 1, '2025-12-10 16:41:10');
+INSERT INTO `tuyen_tram` VALUES ('02', '98_004', 10, 2626.22, 0, '2025-12-11 08:31:53');
 
 -- ----------------------------
 -- Table structure for xa_phuong
