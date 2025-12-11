@@ -50,9 +50,9 @@
 
 <body>
   <div id="topbar">
-    <label for="routeSelect">Route:</label>
+    <label for="routeSelect">Tuyến:</label>
     <select id="routeSelect">
-      <option value="">-- Select a route --</option>
+      <option value="">-- Tất cả --</option>
       {% for r in routes %}
       <option value="{{ r.MaTuyen }}">
         {{ r.MaTuyen }} - {{ r.TenTuyen }}
@@ -60,28 +60,35 @@
       {% endfor %}
     </select>
 
-    <label for="directionSelect" style="margin-left: 12px;">Direction:</label>
+    <label for="directionSelect" style="margin-left: 12px;">Chiều:</label>
     <select id="directionSelect">
-      <option value="0">Chiều đi</option>
-      <option value="1">Chiều về</option>
+      <option value="0">Đi</option>
+      <option value="1">Về</option>
     </select>
 
     <!-- NEW: New route button (right side) -->
     <button id="newRouteBtn" type="button" style="float:right;padding:4px 10px;margin-right:8px;
                  background:#2196F3;color:white;border:none;
                  border-radius:4px;cursor:pointer;">
-      New route
+      Thêm tuyến
     </button>
   </div>
 
   <div id="routeStopsPanel" style="position:absolute;top:56px;left:10px;width:260px;
-            max-height:300px;overflow:auto;
+            max-height:400px;overflow:auto;
             background:#fff;border:1px solid #ccc;border-radius:4px;
             padding:8px;font-size:13px;z-index:998;
             box-shadow:0 2px 6px rgba(0,0,0,0.2);display:none;">
   </div>
 
   <div id="map"></div>
+
+  <div id="locationSearchPanel">
+    <input id="locationSearchInput" type="text" placeholder="Tìm..." autocomplete="off" />
+    <button id="gpsLocateBtn" type="button" title="Use my location">📍</button>
+  </div>
+
+
   <div id="messageBox"></div>
 
   <div id="addStopPanel" style="position:absolute;top:80px;right:10px;width:260px;
@@ -93,10 +100,10 @@
     <div><strong>Start:</strong> <span id="pathStartName">(none)</span></div>
     <div><strong>End:</strong> <span id="pathEndName">(none)</span></div>
 
-    <div style="margin-top:4px;"><strong>Path:</strong></div>
+    <div style="margin-top:4px;"><strong>Chỉ đường:</strong></div>
     <div id="pathSummary" class="path-summary">(none)</div>
 
-    <div style="margin-top:4px;"><strong>All paths:</strong></div>
+    <div style="margin-top:4px;"><strong>Đường đi:</strong></div>
     <div id="pathList" class="path-list"></div>
 
     <button id="clearPathBtn" type="button">Clear</button>

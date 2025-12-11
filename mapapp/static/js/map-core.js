@@ -47,6 +47,8 @@ let pathEndMarker = null;
 let currentPathPolylines = [];  // google.maps.Polyline[]
 let stopNameById = {};
 
+let _myLocationMarker = null;
+
 
 //
 // TYPE 2 (Điểm dừng)  — triangles
@@ -162,7 +164,7 @@ function resetPathSelection() {
 
 
 
-// initMap – full logic: overlay, markers, click handlers
+// initMap - full logic: overlay, markers, click handlers
 function initMap() {
   const center = { lat: 9.602097, lng: 105.973469 }; // adjust to your city
   map = new google.maps.Map(document.getElementById("map"), {
@@ -179,7 +181,7 @@ function initMap() {
   mapOverlay.draw = function () { };
   mapOverlay.setMap(map);
 
-  // Middle–mouse rectangle selection (defined in map-selection.js)
+  // Middle-mouse rectangle selection (defined in map-selection.js)
   setupRectangleSelection();
 
   // Create stop markers (defined in map-stops.js)
@@ -208,7 +210,7 @@ function initMap() {
       selectedStop.stopData.lng = newLatLng.lng();
       isChangingLocation = false;
 
-      showMessage("Saving new stop location...");
+      showMessage("Đang lưu vị trí điểm dừng...");
 
       fetch("/update-stop-location/", {
         method: "POST",
@@ -224,12 +226,12 @@ function initMap() {
           if (!data.success) {
             showMessage("Stop moved, but DB update failed: " + data.error, 5000);
           } else {
-            showMessage("Stop location updated.", 2500);
+            showMessage("Đã cập nhật vị trí điểm dừng.", 2500);
           }
         })
         .catch((err) => {
           console.error(err);
-          showMessage("Stop moved, but error updating DB.", 5000);
+          showMessage("Lỗi khi cập nhật cơ sở dữ liệu.", 5000);
         });
 
       return;
@@ -239,13 +241,15 @@ function initMap() {
   // Map right-click: add stop to route
   map.addListener("rightclick", async (event) => {
     if (!currentRouteMaTuyen) {
-      showMessage("Select a route and direction first.", 3000);
+      showMessage("Chọn 1 tuyến trước.", 3000);
       return;
     }
 
     pendingStopLatLng = event.latLng;
     await openAddStopPanel();  // defined in map-stops.js
   });
+
+  setupLocationSearchUI();
 }
 
 function buildPathSummary(path) {
@@ -374,3 +378,103 @@ function updatePathPanel(path = null) {
   }
 }
 
+function setupLocationSearchUI() {
+  const input = document.getElementById("locationSearchInput");
+  const gpsBtn = document.getElementById("gpsLocateBtn");
+
+  if (input) {
+    // Enter to search
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        const query = input.value.trim();
+        if (query) {
+          searchLocationByText(query);
+        }
+      }
+    });
+  }
+
+  if (gpsBtn) {
+    gpsBtn.addEventListener("click", () => {
+      locateMe();
+    });
+  }
+}
+
+/**
+ * Use Google Geocoding API (via Maps JS geocoder) to find the location
+ * and center the map there.
+ */
+function searchLocationByText(query) {
+  if (!geocoder) {
+    showMessage("Search is not ready yet.", 3000);
+    return;
+  }
+
+  geocoder.geocode({ address: query }, (results, status) => {
+    if (status === "OK" && results && results.length > 0) {
+      const loc = results[0].geometry.location;
+      map.setCenter(loc);
+
+      // Don't zoom out if user was already zoomed in
+      const currentZoom = map.getZoom() || 10;
+      map.setZoom(Math.max(currentZoom, 15));
+    } else if (status === "ZERO_RESULTS") {
+      showMessage("No results for that location.", 3000);
+    } else {
+      console.error("Geocode error:", status, results);
+      showMessage("Error searching for location.", 3000);
+    }
+  });
+}
+
+/**
+ * Use browser geolocation to locate the user and center the map.
+ */
+function locateMe() {
+  if (!navigator.geolocation) {
+    showMessage("Your browser does not support GPS location.", 4000);
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const latLng = new google.maps.LatLng(lat, lng);
+
+      map.setCenter(latLng);
+      const currentZoom = map.getZoom() || 10;
+      if (currentZoom < 16) {
+        map.setZoom(16);
+      }
+
+      // Reuse a single marker for "my location"
+      if (_myLocationMarker) {
+        _myLocationMarker.setPosition(latLng);
+      } else {
+        _myLocationMarker = new google.maps.Marker({
+          map: map,
+          position: latLng,
+          title: "You are here",
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 6,
+            fillColor: "#4285f4",
+            fillOpacity: 1,
+            strokeColor: "#ffffff",
+            strokeWeight: 2,
+          },
+        });
+      }
+    },
+    (err) => {
+      console.error("Geolocation error:", err);
+      if (err.code === err.PERMISSION_DENIED) {
+        showMessage("Location permission denied.", 4000);
+      } else {
+        showMessage("Could not get your location.", 4000);
+      }
+    }
+  );
+}

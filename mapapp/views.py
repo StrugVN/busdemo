@@ -822,8 +822,8 @@ def shortest_path_view(request):
         start,
         end,
         best_distance=best_dist,
-        max_factor=50,
-        max_paths=50000,
+        max_factor=20,
+        max_paths=500000,
     )
 
     # Ensure the true best path is included in the set
@@ -839,7 +839,7 @@ def shortest_path_view(request):
     diverse_paths = filter_similar_paths(
         all_candidate_paths,
         max_keep=30,           # tweak: how many distinct paths you want
-        similarity_threshold=0.7,  # lower = more different
+        similarity_threshold=0.8,  # lower = more different
     )
 
     # After filtering, recompute best_index (shortest in the kept set)

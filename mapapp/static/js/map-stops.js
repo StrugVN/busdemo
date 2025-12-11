@@ -110,7 +110,7 @@ function renderRouteStopsPanel(stops) {
 
     let html = `
     <div>
-      <b>Route ${currentRouteMaTuyen}</b>
+      <b>Tuyến ${currentRouteMaTuyen}</b>
     </div>
     <div style="margin-top:6px;">
   `;
@@ -315,8 +315,8 @@ async function openAddStopPanel(fromStop = false) {
     panel.innerHTML = `
     <div>
       <b>Thêm điểm dừng</b><br/>
-      Route ${currentRouteMaTuyen} (${currentRouteChieu === "0" ? "Chiều đi" : "Chiều về"})<br/>
-      <small>Clicked at: ${lat}, ${lng}</small>
+      Tuyến ${currentRouteMaTuyen} (${currentRouteChieu === "0" ? "Chiều đi" : "Chiều về"})<br/>
+      <small>Tọa độ: ${lat}, ${lng}</small>
 
       <div style="margin-top:6px;">
         <label style="font-size:12px;">Dùng điểm dừng có sẵn:</label><br/>
@@ -342,12 +342,12 @@ async function openAddStopPanel(fromStop = false) {
         <label style="font-size:12px;">Địa chỉ:</label><br/>
         <input id="diaChiInput" type="text"
                 style="width:100%;padding:3px 4px;margin-bottom:4px;"
-                placeholder="Fetching address..." />
+                placeholder="Đang lấy địa chỉ..." />
 
         <!-- NEW: Ward dropdown -->
         <label style="font-size:12px;">Xã:</label><br/>
         <select id="newStopMaXa" style="width:100%;padding:3px 4px;margin-bottom:4px;">
-            <option value="">-- Ward / Commune --</option>
+            <option value="">-- Thêm xã --</option>
             ${xaOptions}
         </select>
 
@@ -538,7 +538,7 @@ function createStopMarker(stop) {
         <button id="deleteStopBtn_${stop.MaTram}"
                 style="flex:1; padding:4px 6px; border-radius:4px;
                        border:1px solid #f44336; background:#f44336; color:white; cursor:pointer;">
-          Remove
+          Xóa khỏi tuyến
         </button>`
             : "";
 
@@ -552,7 +552,7 @@ function createStopMarker(stop) {
                   <button id="setStartBtn_${stop.MaTram}"
                           style="flex:1; padding:3px 5px; border-radius:4px;
                                   border:1px solid #4CAF50; background:#4CAF50; color:white; cursor:pointer;">
-                    Start
+                    Chọn điểm bắt đầu
                   </button>
                 </div>
             `;
@@ -563,7 +563,7 @@ function createStopMarker(stop) {
                   <button id="setEndBtn_${stop.MaTram}"
                           style="flex:1; padding:3px 5px; border-radius:4px;
                                   border:1px solid #FF9800; background:#FF9800; color:white; cursor:pointer;">
-                    End
+                    Chọn điểm cuối
                   </button>
                 </div>
             `;
@@ -573,12 +573,12 @@ function createStopMarker(stop) {
         }
 
         const content = `
-            <div style="min-width:230px">
+            <div style="min-width:250px; max-width:400px;">
                 <b>${stop.TenTram || stop.MaTram}</b><br/>
-                Code: ${stop.MaTram}<br/>
-                Type: ${stop.MaLoai == 1 ? "Bến" : "Điểm dừng"}<br/>
-                Address: ${stop.DiaChi || "N/A"}<br/>
-                Ward: ${stop.TenXa || "N/A"}<br/>
+                Mã: ${stop.MaTram}<br/>
+                Loại: ${stop.MaLoai == 1 ? "Bến" : "Điểm dừng"}<br/>
+                Địa chỉ: ${stop.DiaChi || "N/A"}<br/>
+                Xã: ${stop.TenXa || "N/A"}<br/>
 
                 <div style="margin-top:6px;">
                 <b>Tuyến đi qua:</b>
@@ -594,7 +594,7 @@ function createStopMarker(stop) {
                 <button id="editStopBtn_${stop.MaTram}"
                         style="flex:1; padding:4px 6px; border-radius:4px;
                                 border:1px solid #ddd; background:#fafafa; cursor:pointer;">
-                    Edit
+                    Sửa thông tin
                 </button>
 
                 ${removeButtonHtml}
@@ -602,7 +602,7 @@ function createStopMarker(stop) {
                 <button id="moveStopBtn_${stop.MaTram}"
                         style="flex:1; padding:4px 6px; border-radius:4px;
                                 border:1px solid #2196F3; background:#2196F3; color:white; cursor:pointer;">
-                    Move
+                    Di chuyển
                 </button>
                 </div>
             </div>
@@ -641,7 +641,7 @@ function createStopMarker(stop) {
                 moveBtn.onclick = () => {
                     selectedStop = marker;
                     isChangingLocation = true;
-                    showMessage("Click on map to choose new location.");
+                    showMessage("Bấm vào bản đồ để chọn vị trí mới.");
                 };
             }
 
@@ -662,7 +662,7 @@ function createStopMarker(stop) {
     // Right-click on a stop to add it into the current route at some position
     marker.addListener("rightclick", () => {
         if (!currentRouteMaTuyen) {
-            showMessage("Select a route and direction first.");
+            showMessage("Chọn 1 tuyến trước.");
             return;
         }
 
@@ -749,23 +749,23 @@ function openEditStopDialog(stop, infoWindow) {
 
     panel.innerHTML = `
     <div>
-      <h3>Edit Stop</h3>
+      <h3>Thông tin điểm dừng</h3>
 
-      <label>Name:</label>
+      <label>Tên:</label>
       <input id="editName" value="${stop.TenTram || ""}" 
              style="width:100%;margin-bottom:6px;" />
 
-      <label>Address:</label>
+      <label>Địa chỉ:</label>
       <input id="editAddress" value="${stop.DiaChi || ""}" 
              style="width:100%;margin-bottom:6px;" />
 
-      <label>Type:</label>
+      <label>Loại:</label>
       <select id="editType" style="width:100%;margin-bottom:6px;">
-        <option value="1" ${String(stop.MaLoai) === "1" ? "selected" : ""}>Station</option>
-        <option value="2" ${String(stop.MaLoai) === "2" ? "selected" : ""}>Stop</option>
+        <option value="1" ${String(stop.MaLoai) === "1" ? "selected" : ""}>Bến</option>
+        <option value="2" ${String(stop.MaLoai) === "2" ? "selected" : ""}>Điểm dừng</option>
       </select>
 
-      <label>Ward:</label>
+      <label>Phường/Xã:</label>
       <select id="editMaXa" style="width:100%;margin-bottom:6px;">
         ${xaOptions}
       </select>
@@ -840,18 +840,18 @@ function openEditStopDialog(stop, infoWindow) {
 
 function openDeleteStopConfirm(stop, infoWindow) {
     if (!currentRouteMaTuyen) {
-        showMessage("Select a route first.");
+        showMessage("Chọn 1 tuyến trước.");
         return;
     }
 
     openDialog(`
         <div style="text-align:center;">
-            <b>Remove Stop</b><br><br>
-            Remove <b>${stop.TenTram || stop.MaTram}</b> from route <b>${currentRouteMaTuyen}</b>?<br><br>
+            <b>Xóa điểm dừng</b><br><br>
+            Xóa <b>${stop.TenTram || stop.MaTram}</b> khỏi tuyến <b>${currentRouteMaTuyen}</b>?<br><br>
             <button id="dlgDeleteYes" 
                 style="background:#f44336;color:white;border:none;padding:6px 10px;
                        border-radius:4px;width:100%;margin-bottom:6px;">
-                Remove
+                Xóa
             </button>
             <button id="dlgDeleteNo" 
                 style="background:#ccc;color:black;border:none;padding:6px 10px;

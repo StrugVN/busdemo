@@ -196,17 +196,13 @@ async function loadAndDrawRoute() {
                 const content = `
           <div>
             <b>Node #${idx}</b><br/>
-            <button id="addNodeBtn" type="button"
-                    style="background:#4CAF50;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;">
-              Add node
-            </button>
             <button id="delNodeBtn" type="button"
                     style="background:#f44336;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;margin-left:6px;">
-              Delete node
+              Xóa nút
             </button>
             <button id="delNodeBeyondBtn" type="button"
                     style="background:#f44336;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;margin-left:6px;">
-              Delete node and beyond
+              Xóa toàn bộ từ đây
             </button>
           </div>
         `;
@@ -215,16 +211,9 @@ async function loadAndDrawRoute() {
                 vertexInfoWindow.open(map);
 
                 google.maps.event.addListenerOnce(vertexInfoWindow, "domready", () => {
-                    const addBtn = document.getElementById("addNodeBtn");
                     const delBtn = document.getElementById("delNodeBtn");
                     const delBeyondBtn = document.getElementById("delNodeBeyondBtn");
 
-                    if (addBtn) {
-                        addBtn.onclick = () => {
-                            awaitingAddNodeClick = true;
-                            showMessage("Click on the map to insert a new node before this one.");
-                        };
-                    }
                     if (delBtn) {
                         delBtn.onclick = () => {
                             if (polylinePath.getLength() <= 2) {
@@ -266,31 +255,31 @@ async function loadAndDrawRoute() {
         const r = ROUTE_INFO[currentRouteMaTuyen];
 
         const content = `
-        <div>
-            <b>Route ${currentRouteMaTuyen} — ${r.TenTuyen}</b><br/>
-            Direction: ${currentRouteChieu === "0" ? "Chiều đi" : "Chiều về"}<br/><br/>
+        <div style="min-width:250px;">
+            <b>Tuyến ${currentRouteMaTuyen} — ${r.TenTuyen}</b><br/>
+            Chiều: ${currentRouteChieu === "0" ? "Đi" : "Về"}<br/><br/>
 
             <table style="font-size:12px;">
-            <tr><td><b>Độ dài:</b></td><td>${r.DoDai ?? '–'} km</td></tr>
-            <tr><td><b>Giá vé:</b></td><td>${r.GiaVe ?? '–'} đ</td></tr>
-            <tr><td><b>Thời gian toàn tuyến:</b></td><td>${r.ThoiGianToanTuyen ?? '–'} phút</td></tr>
-            <tr><td><b>Bắt đầu:</b></td><td>${r.GioBatDay ?? '–'}</td></tr>
-            <tr><td><b>Kết thúc:</b></td><td>${r.GioKetThuc ?? '–'}</td></tr>
-            <tr><td><b>Giữa 2 chuyến:</b></td><td>${r.ThoiGianGiua2Tuyen ?? '–'} phút</td></tr>
-            <tr><td><b>Số chuyến:</b></td><td>${r.SoChuyen ?? '–'}</td></tr>
+            <tr><td><b>Độ dài:</b></td><td>${r.DoDai ?? '-'} km</td></tr>
+            <tr><td><b>Giá vé:</b></td><td>${r.GiaVe ?? '-'} đ</td></tr>
+            <tr><td><b>Thời gian toàn tuyến:</b></td><td>${r.ThoiGianToanTuyen ?? '-'} phút</td></tr>
+            <tr><td><b>Bắt đầu:</b></td><td>${r.GioBatDay ?? '-'}</td></tr>
+            <tr><td><b>Kết thúc:</b></td><td>${r.GioKetThuc ?? '-'}</td></tr>
+            <tr><td><b>Giữa 2 chuyến:</b></td><td>${r.ThoiGianGiua2Tuyen ?? '-'} phút</td></tr>
+            <tr><td><b>Số chuyến:</b></td><td>${r.SoChuyen ?? '-'}</td></tr>
             </table>
 
             <div style="display:flex; gap:6px; margin-top:6px;">
             <button id="editRouteBtn" type="button"
                     style="flex:1;background:#2196F3;color:white;border:none;
                             padding:5px 10px;border-radius:4px;cursor:pointer;">
-                Edit path
+                Sửa hành trình
             </button>
 
             <button id="editRouteInfoBtn" type="button"
                     style="flex:1;background:#2196F3;color:white;border:none;
                             padding:5px 10px;border-radius:4px;cursor:pointer;">
-                Edit info
+                Sửa thông tin
             </button>
             </div>
         </div>
@@ -360,11 +349,11 @@ function enterRouteEditMode() {
 
     currentPolyline.setEditable(true);
 
-    showMessage("Route edit mode: drag vertices, click a vertex to Add/Delete.");
+    showMessage("Chế độ chỉnh sửa hành trình: Kéo/thả nút. Bấm vào các điểm để chọn thêm hoặc xóa nút.");
 
     const applyBtn = document.getElementById("applyRouteChangesBtn");
     applyBtn.style.display = "block";
-    applyBtn.textContent = `Apply changes to route ${currentRouteMaTuyen}`;
+    applyBtn.textContent = `Lưu hành trình mới - Tuyến ${currentRouteMaTuyen}`;
 
     const cancelBtn = document.getElementById("cancelRouteChangesBtn");
     cancelBtn.style.display = "block";
@@ -440,7 +429,7 @@ function cancelRouteChanges() {
         polylinePath.push(new google.maps.LatLng(pt.lat, pt.lng));
     });
 
-    showMessage("Changes cancelled.", 2500);
+    showMessage("Hủy thay đổi.", 2500);
 
     exitRouteEditMode();
 }
@@ -456,7 +445,7 @@ function htmlEscape(str) {
 
 function openEditRouteInfoPanel() {
     if (!currentRouteMaTuyen) {
-        showMessage("Select a route first.", 2500);
+        showMessage("Chọn 1 tuyến trước.", 2500);
         return;
     }
 
@@ -470,10 +459,10 @@ function openEditRouteInfoPanel() {
     panel.innerHTML = `
       <div>
         <h3 style="margin-top:0;margin-bottom:8px;">
-          Edit route info – ${currentRouteMaTuyen}
+          Sửa thông tin tuyến - ${currentRouteMaTuyen}
         </h3>
 
-        <label style="font-size:12px;">Route name:</label><br/>
+        <label style="font-size:12px;">Tên tuyến:</label><br/>
         <input id="ri_TenTuyen" type="text"
                style="width:100%;margin-bottom:6px;padding:3px 4px;"
                value="${r.TenTuyen ?? ""}"/>
@@ -616,7 +605,7 @@ function cleanupNewRouteDrawing() {
     // reset button label if present
     const newRouteBtn = document.getElementById("newRouteBtn");
     if (newRouteBtn) {
-        newRouteBtn.textContent = "New route";
+        newRouteBtn.textContent = "Thêm tuyến";
     }
 }
 
@@ -656,7 +645,7 @@ function beginNewRouteDrawing() {
         editable: true
     });
 
-    showMessage("Bấm để thêm đường, bấm 'Finish route' khi xong.", 12000);
+    showMessage("Bấm để thêm đường, bấm 'Xong' để lưu.", 12000);
 
     // only single-click adds vertices
     newRouteClickListener = map.addListener("click", (e) => {

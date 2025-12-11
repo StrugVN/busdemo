@@ -28,11 +28,11 @@ window.onload = function () {
             if (!newRouteDrawingMode) {
                 // start drawing
                 beginNewRouteDrawing();
-                newRouteBtn.textContent = "Finish route";
+                newRouteBtn.textContent = "Xong";
             } else {
                 // finish drawing
                 finishNewRouteDrawing();
-                newRouteBtn.textContent = "New route";
+                newRouteBtn.textContent = "Thêm tuyến";
             }
         });
     }
