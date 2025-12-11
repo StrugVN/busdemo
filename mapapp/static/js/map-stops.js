@@ -1406,6 +1406,11 @@ function renderSelectedOverlay() {
         strokeOpacity: 0.75,   // visible but not overpowering
         strokeWeight: 5,
         zIndex: 48,            // below colored segments, above other dash spam
+        icons: [{
+            icon: { path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3 },
+            offset: "20px",
+            repeat: "80px",
+        }],
     });
     selectedOverlayPolylines.push(baseLine);
 
