@@ -49,6 +49,10 @@ let stopNameById = {};
 
 let _myLocationMarker = null;
 
+let _initialViewportDone = false;
+
+let suppressNextMapClick = false;
+
 
 //
 // TYPE 2 (Điểm dừng)  — triangles
@@ -162,7 +166,13 @@ function resetPathSelection() {
   }
 }
 
-
+function suppressMapClickOnce() {
+  suppressNextMapClick = true;
+  // Clear even if map click never fires
+  setTimeout(() => {
+    suppressNextMapClick = false;
+  }, 0);
+}
 
 // initMap - full logic: overlay, markers, click handlers
 function initMap() {
@@ -192,6 +202,9 @@ function initMap() {
   // Map click: add node / move stop
   map.addListener("click", (event) => {
     const newLatLng = event.latLng;
+
+    // If the click came from polyline/marker, do NOT treat it as background click
+    if (suppressNextMapClick) return;
 
     // 1) route Add node (highest priority)
     if (editMode && awaitingAddNodeClick && selectedVertexIndex !== null && polylinePath) {
@@ -236,6 +249,20 @@ function initMap() {
 
       return;
     }
+
+    // Background click (on empty map) deselects current route
+    if (
+      currentRouteMaTuyen &&
+      !editMode &&
+      !awaitingAddNodeClick &&
+      !isChangingLocation
+    ) {
+      const sel = document.getElementById("routeSelect");
+      if (sel) sel.value = "";
+      loadAndDrawRoute({ recenter: false });
+    }
+
+
   });
 
   // Map right-click: add stop to route
@@ -477,4 +504,19 @@ function locateMe() {
       }
     }
   );
+}
+
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(";").shift();
+  return null;
+}
+
+function csrfFetch(url, options = {}) {
+  const csrftoken = getCookie("csrftoken");
+  const headers = new Headers(options.headers || {});
+  if (csrftoken) headers.set("X-CSRFToken", csrftoken);
+  headers.set("X-Requested-With", "XMLHttpRequest");
+  return fetch(url, { ...options, headers, credentials: "same-origin" });
 }

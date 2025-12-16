@@ -9,7 +9,8 @@ import math
 from .models import TuyenBus, TramDung
 from collections import defaultdict
 import heapq
-
+from django.db import connection, transaction
+from django.views.decorators.csrf import ensure_csrf_cookie
 
 def wkt_to_latlng_list(wkt: str):
     """
@@ -34,7 +35,7 @@ def wkt_to_latlng_list(wkt: str):
         coords.append({"lat": float(y), "lng": float(x)})
     return coords
 
-
+@ensure_csrf_cookie
 def map_view(request):
     # 1) Load ALL stops (for markers)
     with connection.cursor() as cursor:
@@ -49,6 +50,7 @@ def map_view(request):
                 x.TenXa
             FROM tram_dung d
             LEFT JOIN xa_phuong x ON d.MaXa = x.MaXa
+            WHERE d.is_deleted = 0
         """)
         rows = cursor.fetchall()
 
@@ -80,6 +82,7 @@ def map_view(request):
                 ThoiGianGiua2Tuyen,
                 SoChuyen
             FROM tuyen_bus
+            WHERE is_deleted = 0
         """)
         rows = cursor.fetchall()
 
@@ -238,7 +241,7 @@ def route_stops_view(request):
                    d.TenTram, d.KinhDo, d.ViDo, d.MaLoai
             FROM tuyen_tram t
             LEFT JOIN tram_dung d ON t.MaTram = d.MaTram
-            WHERE t.MaTuyen = %s AND t.Chieu = %s
+            WHERE t.MaTuyen = %s AND t.Chieu = %s AND d.is_deleted = 0
             ORDER BY t.STT
             """,
             [ma_tuyen, chieu_int],
@@ -1222,3 +1225,70 @@ def filter_similar_paths(paths, max_keep=30, similarity_threshold=0.7):
             break
 
     return kept
+
+@require_POST
+def delete_route(request):
+    body = json.loads(request.body or "{}")
+    ma_tuyen = body.get("MaTuyen")
+    if not ma_tuyen:
+        return JsonResponse({"success": False, "error": "MaTuyen required"}, status=400)
+
+    with connection.cursor() as cur:
+        cur.execute("UPDATE tuyen_bus SET is_deleted=1 WHERE MaTuyen=%s", [ma_tuyen])
+
+    return JsonResponse({"success": True})
+
+@require_POST
+def delete_stop(request):
+    body = json.loads(request.body or "{}")
+    ma_tram = body.get("MaTram")
+    if not ma_tram:
+        return JsonResponse({"success": False, "error": "MaTram required"}, status=400)
+
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            # 1) affected routes
+            cur.execute(
+                "SELECT DISTINCT MaTuyen, Chieu FROM tuyen_tram WHERE MaTram=%s",
+                [ma_tram],
+            )
+            affected = cur.fetchall()  # [(MaTuyen, Chieu), ...]
+
+            # 2) soft delete stop
+            cur.execute("UPDATE tram_dung SET is_deleted=1 WHERE MaTram=%s", [ma_tram])
+
+            # 3) remove from all routes
+            cur.execute("DELETE FROM tuyen_tram WHERE MaTram=%s", [ma_tram])
+
+            # 4) recompute each affected route/direction
+            for ma_tuyen, chieu in affected:
+                cur.execute(
+                    """
+                    SELECT tt.MaTram, td.ViDo, td.KinhDo
+                    FROM tuyen_tram tt
+                    JOIN tram_dung td ON td.MaTram = tt.MaTram
+                    WHERE tt.MaTuyen=%s AND tt.Chieu=%s AND td.is_deleted=0
+                    ORDER BY tt.STT ASC, tt.CreatedAt ASC
+                    """,
+                    [ma_tuyen, chieu],
+                )
+                rows = cur.fetchall()  # [(MaTram, Lat, Lng), ...]
+
+                for i, (mt, vido, kinhdo) in enumerate(rows):
+                    stt = i + 1
+                    if i == len(rows) - 1:
+                        dist = None
+                    else:
+                        _, vido2, kinhdo2 = rows[i + 1]
+                        dist = haversine_meters(vido, kinhdo, vido2, kinhdo2)
+
+                    cur.execute(
+                        """
+                        UPDATE tuyen_tram
+                        SET STT=%s, KhoangCachDenTramTiepTheo=%s
+                        WHERE MaTuyen=%s AND Chieu=%s AND MaTram=%s
+                        """,
+                        [stt, dist, ma_tuyen, chieu, mt],
+                    )
+
+    return JsonResponse({"success": True})

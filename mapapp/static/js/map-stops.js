@@ -526,6 +526,7 @@ function createStopMarker(stop) {
     const info = new google.maps.InfoWindow();
 
     marker.addListener("click", () => {
+        suppressMapClickOnce();    
         if (currentlyOpenInfoWindow) {
             currentlyOpenInfoWindow.close();
         }
@@ -604,6 +605,13 @@ function createStopMarker(stop) {
                                 border:1px solid #2196F3; background:#2196F3; color:white; cursor:pointer;">
                     Di chuyển
                 </button>
+
+                <button id="deleteStopEntityBtn_${stop.MaTram}"
+                    style="flex:1; padding:4px 6px; border-radius:4px;
+                            border:1px solid #f44336; background:#f44336; color:white; cursor:pointer;">
+                    Xóa điểm dừng
+                </button>
+
                 </div>
             </div>
         `;
@@ -622,6 +630,51 @@ function createStopMarker(stop) {
             const editBtn = document.getElementById(`editStopBtn_${stop.MaTram}`);
             const deleteBtn = document.getElementById(`deleteStopBtn_${stop.MaTram}`);
             const moveBtn = document.getElementById(`moveStopBtn_${stop.MaTram}`);
+
+            const delEntityBtn = document.getElementById(`deleteStopEntityBtn_${stop.MaTram}`);
+            if (delEntityBtn) {
+                delEntityBtn.onclick = async () => {
+                    openDialog(`
+                    <div style="text-align:center;">
+                        <b>Delete Stop</b><br><br>
+                        Delete stop <b>${stop.TenTram || stop.MaTram}</b>?<br>
+                        This removes it from ALL routes.<br><br>
+                        <button id="dlgYes" style="background:#f44336;color:white;border:none;padding:6px 10px;border-radius:4px;width:100%;margin-bottom:6px;">Delete</button>
+                        <button id="dlgNo" style="background:#ccc;color:black;border:none;padding:6px 10px;border-radius:4px;width:100%;">Cancel</button>
+                    </div>
+                    `);
+
+                    document.getElementById("dlgNo").onclick = closeDialog;
+                    document.getElementById("dlgYes").onclick = async () => {
+                        const res = await csrfFetch("/delete-stop/", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ MaTram: stop.MaTram })
+                        });
+                        const data = await res.json();
+                        closeDialog();
+                        info.close();
+
+                        if (!data.success) return showMessage("Failed to delete stop.");
+                        showMessage("Stop deleted.");
+
+                        // Remove marker from map
+                        if (marker) {
+                            marker.setMap(null);
+                        }
+
+                        // Remove from local STOPS array
+                        const idx = STOPS.findIndex(s => s.MaTram === stop.MaTram);
+                        if (idx !== -1) STOPS.splice(idx, 1);
+
+                        // If this stop is part of the currently selected route → redraw route stops
+                        if (currentRouteMaTuyen) {
+                            loadAndDrawRoute({ recenter: false });
+                        }
+                    };
+                };
+            }
+
 
             if (startBtn && typeof handleSetAsStart === "function") {
                 startBtn.onclick = () => {
@@ -1094,9 +1147,9 @@ function renderPathsOnMap(data) {
         flushSegment();
     });
 
-    if (!bounds.isEmpty()) {
-        map.fitBounds(bounds);
-    }
+    // if (!bounds.isEmpty()) {
+    //     map.fitBounds(bounds);
+    // }
 
     updatePathPanel(bestPath);
 }
@@ -1326,9 +1379,9 @@ function renderAllPaths() {
         flushAlt();
     });
 
-    if (!bounds.isEmpty()) {
-        map.fitBounds(bounds);
-    }
+    // if (!bounds.isEmpty()) {
+    //     map.fitBounds(bounds);
+    // }
 
     // "Path" summary = currently selected path
     updatePathPanel(getSelectedPath());

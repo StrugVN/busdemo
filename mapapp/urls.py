@@ -15,4 +15,7 @@ urlpatterns = [
     path("update-route-info/", views.update_route_info_view, name="update_route_info"),
     path("stop-routes/", views.stop_routes_view, name="stop_routes"),
     path("new-route/", views.new_route_view, name="new_route"),
+
+    path("delete-route/", views.delete_route),
+    path("delete-stop/", views.delete_stop),
 ]

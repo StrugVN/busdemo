@@ -71,7 +71,9 @@ async function loadAllRoutesForCurrentDirection() {
                     routeSelect.value = r.MaTuyen;   // pick this route
                 }
                 // uses current directionSelect value, clears previews, draws main route
-                loadAndDrawRoute();
+
+                suppressMapClickOnce(); 
+                loadAndDrawRoute({ recenter: true});
             });
 
             allRoutesPolylines.push(poly);
@@ -83,14 +85,19 @@ async function loadAllRoutesForCurrentDirection() {
     }
 
     if (!bounds.isEmpty()) {
-        map.setCenter({ lat: 9.602097, lng: 105.973469 });
-        map.setZoom(11);
+        if (!_initialViewportDone) {
+            map.setCenter({ lat: 9.602097, lng: 105.973469 });
+            map.setZoom(11);
+            _initialViewportDone = true;
+        }
     }
 
 }
 
 
-async function loadAndDrawRoute() {
+async function loadAndDrawRoute(opts = {}) {
+    const recenter = !!opts.recenter;
+
     const maTuyen = document.getElementById("routeSelect").value;
     const chieu = document.getElementById("directionSelect").value;
 
@@ -281,6 +288,12 @@ async function loadAndDrawRoute() {
                             padding:5px 10px;border-radius:4px;cursor:pointer;">
                 Sửa thông tin
             </button>
+
+            <button id="deleteRouteBtn" type="button"
+                style="background:#f44336;color:white;border:none;padding:5px 10px;
+                        border-radius:4px;margin-top:6px;cursor:pointer;margin-left:6px;">
+                Xóa tuyến
+            </button>
             </div>
         </div>
         `;
@@ -308,6 +321,46 @@ async function loadAndDrawRoute() {
                     routeInfoWindow.close();
                 };
             }
+
+            const delBtn = document.getElementById("deleteRouteBtn");
+            if (delBtn) {
+                delBtn.onclick = async () => {
+                    openDialog(`
+                    <div style="text-align:center;">
+                        <b>Xóa tuyến</b><br><br>
+                        Xóa tuyến <b>${currentRouteMaTuyen}</b>?<br><br>
+                        <button id="dlgYes" style="background:#f44336;color:white;border:none;padding:6px 10px;border-radius:4px;width:100%;margin-bottom:6px;">Xóa</button>
+                        <button id="dlgNo" style="background:#ccc;color:black;border:none;padding:6px 10px;border-radius:4px;width:100%;">Hủy</button>
+                    </div>
+                    `);
+
+                    document.getElementById("dlgNo").onclick = closeDialog;
+                    document.getElementById("dlgYes").onclick = async () => {
+                        const res = await csrfFetch("/delete-route/", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ MaTuyen: currentRouteMaTuyen })
+                        });
+                        const data = await res.json();
+                        closeDialog();
+                        routeInfoWindow.close();
+
+                        if (!data.success) return showMessage("Failed to delete route.");
+                        showMessage("Route deleted.");
+
+                        // Remove from ROUTES
+                        const rIdx = ROUTES.findIndex(r => r.MaTuyen === currentRouteMaTuyen);
+                        if (rIdx !== -1) ROUTES.splice(rIdx, 1);
+
+                        // Clear current selection
+                        currentRouteMaTuyen = null;
+                        clearSelectedRoute();
+
+                        // Redraw all routes (preview mode)
+                        loadAllRoutesForCurrentDirection();
+                    };
+                };
+            }
         });
     });
 
@@ -315,9 +368,11 @@ async function loadAndDrawRoute() {
     routeVertices.forEach(pt => bounds.extend(pt));
 
     // only recenter if route is NOT currently visible
-    if (!isRouteVisible(bounds)) {
+    if (recenter && !isRouteVisible(bounds)) {
         map.fitBounds(bounds);
+        _initialViewportDone = true;
     }
+
 
     await updateStopIconsForCurrentRoute();
 }
