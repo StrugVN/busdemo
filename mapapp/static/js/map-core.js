@@ -58,26 +58,43 @@ let suppressNextMapClick = false;
 // TYPE 2 (Điểm dừng)  — triangles
 //
 const iconTriangleRed = {
-  path: "M 0,6 L -5,-3 L 5,-3 z",
-  fillColor: "#d32f2f",
+  path: google.maps.SymbolPath.CIRCLE,
+  scale: 6,
+  fillColor: "#C62828",
   fillOpacity: 1,
-  strokeColor: "#ffffff",
-  strokeWeight: 1,
-  scale: 1.4,
+  strokeColor: "#FFFFFF",
+  strokeWeight: 2,
 };
 
 const iconTriangleGreen = {
-  path: "M 0,6 L -5,-3 L 5,-3 z",
-  fillColor: "#4CAF50",
+  path: google.maps.SymbolPath.CIRCLE,
+  scale: 6,
+  fillColor: "#2E7D32",
   fillOpacity: 1,
-  strokeColor: "#ffffff",
-  strokeWeight: 1,
-  scale: 1.4,
+  strokeColor: "#FFFFFF",
+  strokeWeight: 2,
 };
 
 //
 // TYPE 1 (Bến xe) — hexagons
 //
+
+function makeStationPin(fill) {
+  return {
+    path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z",
+    fillColor: fill,
+    fillOpacity: 1,
+    strokeColor: "#FFFFFF",
+    strokeWeight: 2,
+    scale: 1.4,
+    anchor: new google.maps.Point(12, 22),
+  };
+}
+
+const iconHexagonOrange = makeStationPin("#EF6C00"); // off-route station
+const iconHexagonGreen = makeStationPin("#2E7D32"); // on-route station
+
+
 const iconHexagonRed = {
   path: "M -5,0 L -2.5,-4.3 L 2.5,-4.3 L 5,0 L 2.5,4.3 L -2.5,4.3 z",
   fillColor: "#d32f2f",
@@ -90,24 +107,6 @@ const iconHexagonRed = {
 const iconHexagonBlue = {
   path: "M -5,0 L -2.5,-4.3 L 2.5,-4.3 L 5,0 L 2.5,4.3 L -2.5,4.3 z",
   fillColor: "#2196F3",  // BLUE
-  fillOpacity: 1,
-  strokeColor: "#ffffff",
-  strokeWeight: 1,
-  scale: 1.25,
-};
-
-const iconHexagonGreen = {
-  path: "M -5,0 L -2.5,-4.3 L 2.5,-4.3 L 5,0 L 2.5,4.3 L -2.5,4.3 z",
-  fillColor: "#4CAF50",  // GREEN
-  fillOpacity: 1,
-  strokeColor: "#ffffff",
-  strokeWeight: 1,
-  scale: 1.25,
-};
-
-const iconHexagonOrange = {
-  path: "M -5,0 L -2.5,-4.3 L 2.5,-4.3 L 5,0 L 2.5,4.3 L -2.5,4.3 z",
-  fillColor: "#ff9800",  // ORANGE
   fillOpacity: 1,
   strokeColor: "#ffffff",
   strokeWeight: 1,
@@ -172,6 +171,62 @@ function suppressMapClickOnce() {
   setTimeout(() => {
     suppressNextMapClick = false;
   }, 0);
+}
+
+function closeAllDialogs() {
+  // 1) close Google InfoWindows
+  if (routeInfoWindow) {
+    routeInfoWindow.close();
+    routeInfoWindow = null;
+  }
+  if (vertexInfoWindow) {
+    vertexInfoWindow.close();
+    vertexInfoWindow = null;
+  }
+  if (typeof currentlyOpenInfoWindow !== "undefined" && currentlyOpenInfoWindow) {
+    currentlyOpenInfoWindow.close();
+    currentlyOpenInfoWindow = null;
+  }
+
+  // 2) close the center modal dialogPanel (openDialog/closeDialog)
+  if (typeof closeDialog === "function") {
+    closeDialog();
+  } else {
+    const dlg = document.getElementById("dialogPanel");
+    if (dlg) dlg.style.display = "none";
+  }
+
+  // 3) close the RIGHT panel (you reuse addStopPanel for add/edit stop + edit route)
+  const rightPanel = document.getElementById("addStopPanel");
+  if (rightPanel) {
+    rightPanel.style.display = "none";
+    rightPanel.innerHTML = "";
+  }
+
+  // 4) hide route-stops panel (left)
+  const routeStopsPanel = document.getElementById("routeStopsPanel");
+  if (routeStopsPanel) {
+    routeStopsPanel.style.display = "none";
+    routeStopsPanel.innerHTML = "";
+  }
+
+  // 5) route edit mode UI cleanup
+  const vPanel = document.getElementById("vertexDeletePanel");
+  if (vPanel) {
+    vPanel.style.display = "none";
+    vPanel.innerHTML = "";
+  }
+
+  const applyBtn = document.getElementById("applyRouteChangesBtn");
+  if (applyBtn) applyBtn.style.display = "none";
+
+  const cancelBtn = document.getElementById("cancelRouteChangesBtn");
+  if (cancelBtn) cancelBtn.style.display = "none";
+
+  // if you want "closing dialogs" to also exit edit mode:
+  if (typeof exitRouteEditMode === "function" && editMode) {
+    exitRouteEditMode();
+  }
 }
 
 // initMap - full logic: overlay, markers, click handlers
@@ -250,15 +305,18 @@ function initMap() {
       return;
     }
 
-    // Background click (on empty map) deselects current route
+    // Background click: deselect current route + close all dialogs
     if (
       currentRouteMaTuyen &&
       !editMode &&
       !awaitingAddNodeClick &&
       !isChangingLocation
     ) {
+      closeAllDialogs();
+
       const sel = document.getElementById("routeSelect");
       if (sel) sel.value = "";
+
       loadAndDrawRoute({ recenter: false });
     }
 
@@ -519,4 +577,14 @@ function csrfFetch(url, options = {}) {
   if (csrftoken) headers.set("X-CSRFToken", csrftoken);
   headers.set("X-Requested-With", "XMLHttpRequest");
   return fetch(url, { ...options, headers, credentials: "same-origin" });
+}
+
+function showPathSelectionPanel() {
+  const panel = document.getElementById("pathSelectionPanel");
+  if (panel) panel.style.display = "block";
+}
+
+function hidePathSelectionPanel() {
+  const panel = document.getElementById("pathSelectionPanel");
+  if (panel) panel.style.display = "none";
 }

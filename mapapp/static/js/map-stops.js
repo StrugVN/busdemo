@@ -89,8 +89,8 @@ function formatDistanceLabel(m) {
 
     if (value >= 1000) {
         const km = value / 1000;
-        let s = km.toFixed(2);         // up to 2 decimals
-        s = s.replace(/\.?0+$/, "");   // strip .00 / .10
+        let s = km.toFixed(1);         // up to 1 decimal
+        // s = s.replace(/\.?0+$/, "");   // strip .0
         return s + " km";
     } else {
         // meters, integer
@@ -509,7 +509,15 @@ async function saveStopFromPanel() {
 
 
 function createStopMarker(stop) {
-    let baseIcon = stop.MaLoai == 1 ? iconHexagonOrange : iconTriangleRed;
+    const onRoute = currentRouteStopIds && currentRouteStopIds.has(stop.MaTram);
+
+    let baseIcon;
+    if (stop.MaLoai == 1) {
+        baseIcon = onRoute ? iconHexagonGreen : iconHexagonOrange;
+    } else {
+        baseIcon = onRoute ? iconTriangleGreen : iconTriangleRed;
+    }
+
 
     const marker = new google.maps.Marker({
         position: { lat: stop.lat, lng: stop.lng },
@@ -526,7 +534,7 @@ function createStopMarker(stop) {
     const info = new google.maps.InfoWindow();
 
     marker.addListener("click", () => {
-        suppressMapClickOnce();    
+        suppressMapClickOnce();
         if (currentlyOpenInfoWindow) {
             currentlyOpenInfoWindow.close();
         }
@@ -679,6 +687,7 @@ function createStopMarker(stop) {
             if (startBtn && typeof handleSetAsStart === "function") {
                 startBtn.onclick = () => {
                     handleSetAsStart(stop, marker);
+                    showPathSelectionPanel();
                     info.close();  // close after selecting Start
                 };
             }
@@ -686,6 +695,7 @@ function createStopMarker(stop) {
             if (endBtn && typeof handleSetAsEnd === "function") {
                 endBtn.onclick = () => {
                     handleSetAsEnd(stop, marker);
+                    showPathSelectionPanel();
                     info.close();  // close after selecting End
                 };
             }
@@ -1531,3 +1541,30 @@ async function loadRoutesForStop(maTram) {
         container.textContent = "(error loading routes)";
     }
 }
+
+function getStopIcon({ isStation, isOnRoute }) {
+    const color = isOnRoute ? "#2E7D32" : "#C62828"; // green / red
+
+    if (isStation) {
+        return {
+            path: "M12 2C8.13 2 5 5.13 5 9v6c0 1.1.9 2 2 2v3h2v-3h6v3h2v-3c1.1 0 2-.9 2-2V9c0-3.87-3.13-7-7-7z",
+            fillColor: color,
+            fillOpacity: 1,
+            strokeColor: "#FFFFFF",
+            strokeWeight: 1,
+            scale: 1.2,
+            anchor: new google.maps.Point(12, 12),
+        };
+    }
+
+    // normal stop
+    return {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 6,
+        fillColor: color,
+        fillOpacity: 1,
+        strokeColor: "#FFFFFF",
+        strokeWeight: 2,
+    };
+}
+

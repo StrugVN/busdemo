@@ -14,6 +14,7 @@ window.onload = function () {
     if (clearPathBtn) {
         clearPathBtn.addEventListener("click", () => {
             resetPathSelection();
+            hidePathSelectionPanel();
             if (typeof loadAndDrawRoute === "function") {
                 loadAndDrawRoute({ recenter: true });
             } else if (typeof loadAllRoutesForCurrentDirection === "function") {
